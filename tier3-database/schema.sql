@@ -1,0 +1,62 @@
+CREATE DATABASE IF NOT EXISTS smartspend_db
+  CHARACTER SET utf8mb4
+  COLLATE utf8mb4_unicode_ci;
+
+USE smartspend_db;
+
+CREATE TABLE IF NOT EXISTS users (
+  id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  email         VARCHAR(255) NOT NULL UNIQUE,
+  password_hash VARCHAR(255) NOT NULL,
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS sessions (
+  id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_id    INT UNSIGNED NOT NULL,
+  title      VARCHAR(255) DEFAULT 'Budget Session',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS messages (
+  id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  session_id INT UNSIGNED NOT NULL,
+  role       ENUM('user', 'bot') NOT NULL,
+  content    TEXT NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS budgets (
+  id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  session_id INT UNSIGNED NOT NULL,
+  income     DECIMAL(10,2) NOT NULL,
+  expenses   DECIMAL(10,2) NOT NULL,
+  savings    DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS assessments (
+  id             INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  session_id     INT UNSIGNED NOT NULL,
+  item_name      VARCHAR(255) NOT NULL,
+  item_price     DECIMAL(10,2) NOT NULL,
+  item_type      ENUM('one-time', 'recurring') NOT NULL,
+  risk_level     ENUM('green', 'yellow', 'red') NOT NULL,
+  surplus        DECIMAL(10,2) NOT NULL,
+  surplus_after  DECIMAL(10,2) NOT NULL,
+  months_to_save INT UNSIGNED DEFAULT 0,
+  created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS health_scores (
+  id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_id    INT UNSIGNED NOT NULL,
+  score      TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  trend      ENUM('up', 'down', 'stable') DEFAULT 'stable',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

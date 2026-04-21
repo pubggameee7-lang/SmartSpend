@@ -1,7 +1,8 @@
 <?php
 
 function getAIExplanation(string $context, string $risk_level): string {
-    $api_key = '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';
+   $env = parse_ini_file(__DIR__ . '/../../.env');
+$api_key = $env['CLAUDE_API_KEY'] ?? '';
 
     $system_prompt = "You are SmartSpend, a friendly budget assistant. 
 You are NOT a financial advisor and must never give investment advice. 

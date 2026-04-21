@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SmartSpend — Budget Assistant</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body class="chat-page">
+
+  <!-- Header -->
+  <header class="header">
+    <div class="header-left">
+      <h1 class="logo">Smart<span>Spend</span></h1>
+      <p class="disclaimer">Not a financial advisor — for educational purposes only.</p>
+    </div>
+    <div class="header-right">
+      <span id="user-email" class="user-email"></span>
+      <a href="dashboard.html" class="btn-secondary">Dashboard</a>
+      <button id="logout-btn" class="btn-outline">Log Out</button>
+    </div>
+  </header>
+
+  <!-- Main layout -->
+  <div class="chat-layout">
+
+    <!-- Sidebar — session history -->
+    <aside class="sidebar">
+      <button id="new-session-btn" class="btn-primary full-width">+ New Session</button>
+      <div id="session-list" class="session-list"></div>
+    </aside>
+
+    <!-- Chat area -->
+    <main class="chat-main">
+      <div id="chat-box" class="chat-box">
+        <div class="welcome-msg">
+          <h2>Hello, I am SmartSpend</h2>
+          <p>Tell me your monthly income, expenses, savings, and what you want to buy — I will tell you if you can afford it.</p>
+          <p class="example">Example: "My income is £2500, expenses £1200, savings £800. Can I afford a £400 laptop?"</p>
+        </div>
+      </div>
+
+      <!-- Input area -->
+      <div class="input-area">
+        <textarea
+          id="user-input"
+          placeholder="Type your message here..."
+          rows="2"
+        ></textarea>
+        <button id="send-btn" class="btn-primary">Send</button>
+      </div>
+    </main>
+
+  </div>
+
+  <script src="js/chat.js"></script>
+
+</body>
+</html>

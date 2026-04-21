@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SmartSpend — Dashboard</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body class="dashboard-page">
+
+  <!-- Header -->
+  <header class="header">
+    <div class="header-left">
+      <h1 class="logo">Smart<span>Spend</span></h1>
+      <p class="disclaimer">Not a financial advisor — for educational purposes only.</p>
+    </div>
+    <div class="header-right">
+      <span id="user-email" class="user-email"></span>
+      <a href="index.html" class="btn-secondary">Back to Chat</a>
+      <button id="logout-btn" class="btn-outline">Log Out</button>
+    </div>
+  </header>
+
+  <!-- Dashboard content -->
+  <div class="dashboard-layout">
+
+    <!-- Health score card -->
+    <div class="card">
+      <h2>Financial Health Score</h2>
+      <div class="health-score-display">
+        <div id="score-circle" class="score-circle">
+          <span id="score-number">--</span>
+        </div>
+        <div class="score-info">
+          <p id="score-trend" class="score-trend"></p>
+          <p class="score-desc">Based on your income, expenses, savings and spending decisions.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Stats row -->
+    <div class="stats-row">
+      <div class="stat-card">
+        <p class="stat-label">Total Sessions</p>
+        <p id="total-sessions" class="stat-value">--</p>
+      </div>
+      <div class="stat-card">
+        <p class="stat-label">Last Risk Level</p>
+        <p id="last-risk" class="stat-value">--</p>
+      </div>
+      <div class="stat-card">
+        <p class="stat-label">Last Item Checked</p>
+        <p id="last-item" class="stat-value">--</p>
+      </div>
+    </div>
+
+    <!-- Session history -->
+    <div class="card">
+      <h2>Session History</h2>
+      <div id="session-history" class="session-history">
+        <p class="empty-msg">No sessions yet. Start a chat to see your history here.</p>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="js/dashboard.js"></script>
+
+</body>
+</html>

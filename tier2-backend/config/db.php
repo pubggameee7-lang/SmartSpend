@@ -1,7 +1,7 @@
 <?php
 define('DB_HOST', 'localhost');
 define('DB_NAME', 'j9hlndb_smartspend_db');
-define('DB_USER', 'smartspend_user');
+define('DB_USER', 'j9hlndb_smartspend_user	');
 define('DB_PASS', 'SmartSpend2025!');
 define('DB_CHARSET', 'utf8mb4');
 

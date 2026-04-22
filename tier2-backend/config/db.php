@@ -1,8 +1,8 @@
 <?php
 define('DB_HOST', 'localhost');
 define('DB_NAME', 'smartspend_db');
-define('DB_USER', 'your_db_username');
-define('DB_PASS', 'your_db_password');
+define('DB_USER', 'smartspend_user');
+define('DB_PASS', 'SmartSpend2025!');
 define('DB_CHARSET', 'utf8mb4');
 
 function getDB(): PDO {

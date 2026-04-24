@@ -1,8 +1,20 @@
 <?php
-define('DB_HOST', 'localhost');
-define('DB_NAME', 'j9hlndb_smartspend_db');
-define('DB_USER', 'j9hlndb_smartspend_user');
-define('DB_PASS', 'SmartSpend2025!');
+$env_path     = __DIR__ . '/../../.env';
+$env_contents = file_get_contents($env_path);
+$env          = [];
+
+foreach (explode("\n", $env_contents) as $line) {
+  $line = trim($line);
+  if (!empty($line) && strpos($line, '=') !== false) {
+    [$key, $value] = explode('=', $line, 2);
+    $env[trim($key)] = trim($value);
+  }
+}
+
+define('DB_HOST',    $env['DB_HOST']    ?? 'localhost');
+define('DB_NAME',    $env['DB_NAME']    ?? '');
+define('DB_USER',    $env['DB_USER']    ?? '');
+define('DB_PASS',    $env['DB_PASS']    ?? '');
 define('DB_CHARSET', 'utf8mb4');
 
 function getDB(): PDO {

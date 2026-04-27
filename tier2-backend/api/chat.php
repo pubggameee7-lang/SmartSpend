@@ -28,9 +28,8 @@ if ($session_id === 0) {
   exit;
 }
 
-$db = getDB();
-
-$message = correctTypos(trim($_POST['message'] ?? ''));
+$db      = getDB();
+$message = correctTypos(trim($raw_message));
 
 $stmt = $db->prepare('INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)');
 $stmt->execute([$session_id, 'user', $raw_message]);
@@ -142,20 +141,20 @@ function calculate(float $income, float $expenses, float $savings, float $item_p
   $ef = round($expenses * 3, 2);
 
   if ($item_type === 'recurring') {
-    if ($risk === 'green')        $suggestion = 'You can comfortably afford this. Your monthly surplus after this cost will be £' . number_format($surplus_after, 2) . '.';
-    elseif ($risk === 'yellow')   $suggestion = 'You can afford this but it will reduce your monthly surplus to £' . number_format($surplus_after, 2) . '. Keep an eye on your overall spending.';
-    else                          $suggestion = 'This recurring cost would put your finances under pressure. Consider whether it is essential or if there is a cheaper alternative.';
+    if ($risk === 'green')      $suggestion = 'You can comfortably afford this. Your monthly surplus after this cost will be £' . number_format($surplus_after, 2) . '.';
+    elseif ($risk === 'yellow') $suggestion = 'You can afford this but it reduces your surplus to £' . number_format($surplus_after, 2) . '. Keep an eye on your overall spending.';
+    else                        $suggestion = 'This recurring cost would put your finances under pressure. Consider whether it is essential or if there is a cheaper alternative.';
   } elseif ($risk === 'red' && $surplus > 0) {
     $needed        = $item_price - $savings;
     $cut_per_month = round($needed / 6, 2);
-    $suggestion    = 'To afford this in 6 months you would need to save an extra £' . $cut_per_month . ' per month. Reviewing your subscriptions and direct debits could help free up extra cash.';
+    $suggestion    = 'To afford this in 6 months you would need to save an extra £' . $cut_per_month . ' per month. Reviewing subscriptions and direct debits could help free up extra cash.';
   } elseif ($risk === 'red') {
     $suggestion = 'Your expenses currently exceed your income so saving for this is not possible right now. Focus on reducing expenses first.';
   } elseif ($risk === 'yellow') {
     $monthly    = round($item_price / max($months_to_save, 1), 2);
     $suggestion = 'You are on track - consider setting aside £' . $monthly . ' per month into a dedicated savings pot to reach your goal faster.';
   } else {
-    $suggestion = 'You are in a strong position. Make sure you have at least 3 months of expenses (£' . $ef . ') set aside as an emergency fund before making large purchases.';
+    $suggestion = 'You are in a strong position. Make sure you have at least 3 months of expenses (£' . $ef . ') set aside as an emergency fund.';
   }
 
   return [
@@ -253,13 +252,13 @@ function handleLoanQuestion(array $state): string {
     $risk       = $last['risk_level'];
 
     $save_option = ($surplus > 0 && $months > 0)
-      ? 'By saving your £' . number_format($surplus, 2) . ' monthly surplus you could reach £' . number_format($item_price, 2) . ' in about ' . formatMonths($months) . ' without paying any interest.'
+      ? 'By saving your £' . number_format($surplus, 2) . ' monthly surplus you could reach £' . number_format($item_price, 2) . ' in about ' . formatMonths($months) . ' without paying any interest. '
       : '';
 
     if ($risk === 'green') {
       return 'You are already in a strong position to afford the ' . $item_name . ' without a loan - taking one would mean paying interest unnecessarily. ' . $save_option;
     } else {
-      return 'Taking a loan for the ' . $item_name . ' would mean paying interest on top of the £' . number_format($item_price, 2) . ' purchase price, making it more expensive overall. ' . $save_option . "\n\nIf you do consider a loan, compare interest rates carefully and factor the monthly repayments into your budget. I am not a financial advisor so please do your own research before committing to any borrowing.";
+      return 'Taking a loan for the ' . $item_name . ' would mean paying interest on top of the £' . number_format($item_price, 2) . ' price, making it more expensive overall. ' . $save_option . "\n\nIf you do consider a loan, compare interest rates carefully and factor monthly repayments into your budget. I am not a financial advisor so please do your own research before committing to any borrowing.";
     }
   }
   return 'Taking a loan means paying interest on top of the purchase price, making it more expensive overall. It is generally worth saving up where possible. If you are considering a loan, compare interest rates carefully and factor monthly repayments into your budget. I am not a financial advisor so please do your own research.';
@@ -328,7 +327,7 @@ function buildEmotionalResponse(string $emotion, array $state): string {
     case 'stress':
       return "I hear you - money stress is really common and it does not mean you are bad with money. It usually just means nobody showed you how to track it properly.\n\nSmartSpend can help you get a clear picture of where you stand. There are no wrong answers here - just numbers.\n\n{$resume}";
     case 'general_stress':
-      return "I am sorry to hear things are tough right now. I am here to help with the financial side whenever you are ready - sometimes getting clarity on your money situation can help reduce overall stress.\n\n{$resume}";
+      return "I am sorry to hear things are tough right now. I am here to help with the financial side whenever you are ready - sometimes getting clarity on your money can help reduce overall stress.\n\n{$resume}";
     case 'shame':
       return "Please do not be hard on yourself - most people were never taught how to manage money and it is not a reflection of your worth.\n\nLet's look at the numbers together, no judgment.\n\n{$resume}";
     case 'positive':
@@ -453,13 +452,13 @@ if ($state['step'] === 'sub_frequency') {
   $raw_price    = $state['pending_sub']['raw_price'] ?? 0;
   $monthly_cost = 0;
 
-  if (preg_match('/per month|monthly/i', $message))                      $monthly_cost = $raw_price;
-  elseif (preg_match('/per week|weekly|every week|all 4/i', $message))   $monthly_cost = round($raw_price * 4.33, 2);
-  elseif (preg_match('/3 time|3 week|three|about 3/i', $message))        $monthly_cost = round($raw_price * 3, 2);
-  elseif (preg_match('/2 time|2 week|twice|two|about 2/i', $message))    $monthly_cost = round($raw_price * 2, 2);
-  elseif (preg_match('/once|1 time|1 week|one/i', $message))             $monthly_cost = round($raw_price * 1, 2);
-  elseif (preg_match('/varies|vary|sometimes|it depends/i', $message))   $monthly_cost = round($raw_price * 3, 2);
-  elseif (($n = extractNumber($message)) && $n > 0)                       $monthly_cost = round($raw_price * $n, 2);
+  if (preg_match('/per month|monthly/i', $message))                    $monthly_cost = $raw_price;
+  elseif (preg_match('/per week|weekly|every week|all 4/i', $message)) $monthly_cost = round($raw_price * 4.33, 2);
+  elseif (preg_match('/3 time|3 week|three|about 3/i', $message))      $monthly_cost = round($raw_price * 3, 2);
+  elseif (preg_match('/2 time|2 week|twice|two|about 2/i', $message))  $monthly_cost = round($raw_price * 2, 2);
+  elseif (preg_match('/once|1 time|1 week|one/i', $message))           $monthly_cost = round($raw_price * 1, 2);
+  elseif (preg_match('/varies|vary|sometimes|it depends/i', $message)) $monthly_cost = round($raw_price * 3, 2);
+  elseif (($n = extractNumber($message)) && $n > 0)                     $monthly_cost = round($raw_price * $n, 2);
   else {
     saveAndRespond($db, $session_id, $state, 'How often do you go per month? For example: every week, 3 times, or it varies?', null, ['Every week', 'About 3 times', 'About 2 times', 'It varies', 'Other']);
   }
@@ -601,13 +600,21 @@ switch ($state['step']) {
     break;
 
   case 'followup':
+    // ── Use broader intent classification ─────────────────
+    $intent = classifyIntent($message, $state['step'], $state);
     $price  = extractNumber($message);
-    $intent = 'other';
 
-    if ($price && $price > 0) {
-      $intent = classifyIntent($message, $state['step'], $state);
+    // Custom savings calculation
+    if ($intent === 'custom_savings_calc' || preg_match('/calculate.*based.*on|if I save|can only save|saving.*monthly|save.*per month|based on.*saving/i', $message)) {
+      $saving_amount = $price ?? extractNumber($message);
+      if ($saving_amount && $saving_amount > 0) {
+        $bot_reply     = handleCustomSavingsCalc($saving_amount, $state);
+        $quick_replies = ['Check another item', 'Run a stress test', 'Reset budget', 'Other'];
+        break;
+      }
     }
 
+    // Provide new price to check
     if ($intent === 'provide_price' && $price && $price > 0) {
       $item_type = isRecurring($message) ? 'recurring' : 'one-time';
       [$bot_reply, $calculation] = runCalculation($db, $session_id, $user_id, $state, $message, $price, $item_type);
@@ -615,21 +622,44 @@ switch ($state['step']) {
       break;
     }
 
-    if ($intent === 'express_concern' || preg_match('/not sure|idk|doubt|worried|uncertain|unexpected|things come up|every month though|always save|guarantee/i', $message)) {
+    // Savings concern
+    if ($intent === 'express_concern') {
       $bot_reply     = handleSavingsConcern($message, $state);
       $quick_replies = ['Check another item', 'Run a stress test', 'Reset budget', 'Other'];
       break;
     }
 
-    // Dream goal / emotional attachment to an item
-    if (preg_match('/dream|really want|love it|obsessed|goal|always wanted|my heart|set on|deserve|been wanting/i', $message) && !$price) {
+    // Stress test intent
+    if ($intent === 'stress_test' || preg_match('/stress.*test|what if.*income|lost.*job|redundan/i', $message)) {
+      $state['step'] = 'stress_test';
+      $bot_reply     = "Let's run a stress test. What percentage drop in income are you worried about?";
+      $quick_replies = ['20% drop', '50% drop', 'Total loss', 'Other'];
+      break;
+    }
+
+    // Comparison intent
+    if ($intent === 'comparison' || preg_match('/compare|vs|versus|which.*better|both of them|either.*of/i', $message)) {
+      if (count($state['checks']) > 0) {
+        $last          = end($state['checks']);
+        $bot_reply     = 'Your last check was ' . $last['item_name'] . ' at £' . $last['item_price'] . ' with a ' . $last['risk_level'] . ' risk. What would you like to compare it with?';
+        $state['step'] = 'item';
+        $quick_replies = ['A laptop £800', 'A phone £600', 'Other'];
+      } else {
+        $state['step'] = 'item';
+        $bot_reply     = "Tell me the first item and price and I will help you compare.";
+        $quick_replies = ['Other'];
+      }
+      break;
+    }
+
+    // Dream goal intent
+    if ($intent === 'dream_goal' || preg_match('/dream|really want|love it|obsessed|always wanted|my heart|set on|deserve|been wanting/i', $message)) {
       if (count($state['checks']) > 0) {
         $last      = end($state['checks']);
         $item      = $last['item_name'];
         $months    = $last['calc']['months_to_save'];
         $surplus   = $last['calc']['surplus'];
-        $time      = formatMonths($months);
-        $bot_reply = "That is completely valid - having a goal you are excited about is actually one of the best motivators for saving consistently.\n\nBased on your numbers, if you set aside your £" . number_format($surplus, 2) . " surplus each month, you could have the {$item} in {$time}. That is genuinely something worth working towards.";
+        $bot_reply = "That is completely valid - having a goal you are excited about is actually one of the best motivators for saving consistently.\n\nBased on your numbers, if you set aside your £" . number_format($surplus, 2) . " surplus each month, you could have the {$item} in " . formatMonths($months) . ". That is genuinely something worth working towards.";
       } else {
         $bot_reply = "Having a dream goal is one of the best motivators for getting your finances in order. Would you like to check if you can afford it and how long it would take to save up?";
       }
@@ -637,14 +667,14 @@ switch ($state['step']) {
       break;
     }
 
-    // Handle casual greetings in followup
+    // Casual greeting mid-flow
     if (preg_match('/^(hi|hello|hey|hiya|sup|yo)[\s!.]*$/i', $message)) {
       $bot_reply     = "Hey! We were just looking at your budget. Would you like to check another item, run a stress test, or start over?";
       $quick_replies = ['Check another item', 'Run a stress test', 'Reset budget', 'Other'];
       break;
     }
 
-    // Subscription trigger in followup
+    // Subscription trigger
     if (preg_match('/\bsubscription\b|\bclass(es)?\b|\bpilates\b|\byoga\b|\bgym\b|\bmembership\b/i', $message) && !$price) {
       $state['step']        = 'sub_name';
       $state['pending_sub'] = [];
@@ -659,26 +689,11 @@ switch ($state['step']) {
       }
     }
 
+    // Regex fallbacks for clear keywords
     if (preg_match('/another|check|buy|afford|else|more|yes.*continu|continu|start.*budget/i', $message)) {
       $state['step'] = 'item';
       $bot_reply     = "Sure - your income, expenses and savings are still saved. What else would you like to check?";
       $quick_replies = ['A laptop £800', 'A phone £600', 'A car £10k', 'A subscription', 'Other'];
-
-    } elseif (preg_match('/compare|vs|versus|which|better/i', $message)) {
-      if (count($state['checks']) > 0) {
-        $last          = end($state['checks']);
-        $bot_reply     = 'Your last check was ' . $last['item_name'] . ' at £' . $last['item_price'] . ' with a ' . $last['risk_level'] . ' risk. What would you like to compare it with?';
-        $state['step'] = 'item';
-      } else {
-        $bot_reply     = 'Tell me the first item and price and I will help you compare.';
-        $state['step'] = 'item';
-      }
-      $quick_replies = ['A laptop £800', 'A phone £600', 'Other'];
-
-    } elseif (preg_match('/stress|lost.*job|what if.*income|redundan|unemployed/i', $message)) {
-      $state['step'] = 'stress_test';
-      $bot_reply     = "Let's run a stress test. What percentage drop in income are you worried about?";
-      $quick_replies = ['20% drop', '50% drop', 'Total loss', 'Other'];
 
     } elseif (preg_match('/cut|reduce|save more/i', $message)) {
       $cut_amount = extractNumber($message);
@@ -703,7 +718,8 @@ switch ($state['step']) {
       $quick_replies = ['£1500', '£2000', '£2500', '£3000', 'Other'];
 
     } else {
-      $bot_reply     = "Would you like to check another item, compare two items, run a stress test, or start over?";
+      // ── Generative fallback - let AI respond naturally ──
+      $bot_reply     = generateContextualReply($message, $state);
       $quick_replies = ['Check another item', 'Run a stress test', 'Reset budget', 'Other'];
     }
     break;

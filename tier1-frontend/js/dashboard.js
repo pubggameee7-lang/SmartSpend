@@ -44,7 +44,7 @@ async function loadHealthScore() {
 
     if (!data.success || !data.score) {
       scoreNumber.textContent = '--';
-      scoreTrend.textContent  = 'No data yet — start a chat session';
+      scoreTrend.textContent  = 'No data yet - start a chat session';
       return;
     }
 
@@ -59,20 +59,20 @@ async function loadHealthScore() {
       scoreNumber.style.color       = '#27AE60';
       scoreTrend.style.color        = '#27AE60';
       scoreTrend.textContent        = trend === 'up'
-        ? 'Improving — great work'
+        ? 'Improving - great work'
         : 'Good financial health';
     } else if (score >= 40) {
       scoreCircle.style.borderColor = '#F39C12';
       scoreNumber.style.color       = '#F39C12';
       scoreTrend.style.color        = '#F39C12';
       scoreTrend.textContent        = trend === 'down'
-        ? 'Declining — review your spending'
+        ? 'Declining - review your spending'
         : 'Room for improvement';
     } else {
       scoreCircle.style.borderColor = '#E74C3C';
       scoreNumber.style.color       = '#E74C3C';
       scoreTrend.style.color        = '#E74C3C';
-      scoreTrend.textContent        = 'Low score — reduce expenses';
+      scoreTrend.textContent        = 'Low score - reduce expenses';
     }
   } catch (err) {
     scoreNumber.textContent = '--';

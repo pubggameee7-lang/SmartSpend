@@ -22,7 +22,7 @@ function validateCSRF(string $token): bool {
     && hash_equals($_SESSION['csrf_token'], $token);
 }
 
-// ── Rate limiting — max 5 login attempts per 15 minutes ──
+// ── Rate limiting - max 5 login attempts per 15 minutes ──
 function checkRateLimit(string $email): bool {
   $key = 'login_attempts_' . md5($email);
   if (!isset($_SESSION[$key])) {
@@ -104,7 +104,7 @@ if ($action === 'register') {
   $stmt = $db->prepare('INSERT INTO users (email, password_hash) VALUES (?, ?)');
   $stmt->execute([$email, $hash]);
 
-  // Regenerate session ID after registration — prevents session fixation
+  // Regenerate session ID after registration - prevents session fixation
   session_regenerate_id(true);
   $_SESSION['user_id'] = $db->lastInsertId();
   $_SESSION['email']   = $email;
@@ -137,13 +137,13 @@ if ($action === 'login') {
 
   if (!$user || !password_verify($password, $user['password_hash'])) {
     incrementAttempts($email);
-    // Vague error message — never reveal which part is wrong
+    // Vague error message - never reveal which part is wrong
     respond(false, ['error' => 'Incorrect email or password.'], 401);
   }
 
   resetAttempts($email);
 
-  // Regenerate session ID after login — prevents session fixation
+  // Regenerate session ID after login - prevents session fixation
   session_regenerate_id(true);
   $_SESSION['user_id'] = $user['id'];
   $_SESSION['email']   = $email;

@@ -102,7 +102,7 @@ if ($risk_level === 'red' && $surplus > 0) {
   $suggestion    = "To afford this in 6 months you would need to save an extra £{$cut_per_month} per month.";
 } elseif ($risk_level === 'yellow') {
   $monthly    = round($item_price / max($months_to_save, 1), 2);
-  $suggestion = "You are on track — consider setting aside £{$monthly} per month specifically for this.";
+  $suggestion = "You are on track - consider setting aside £{$monthly} per month specifically for this.";
 } else {
   $ef         = round($expenses * 3, 2);
   $suggestion = "You are in a strong position. Consider keeping at least 3 months of expenses (£{$ef}) as an emergency fund.";

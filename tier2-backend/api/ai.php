@@ -16,18 +16,22 @@ function loadEnv(): array {
   return $env;
 }
 
-function callGroq(string $system, string $user, string $model = 'llama-3.3-70b-versatile', int $max_tokens = 150): ?string {
+function callGroq(string $system, string $user, string $model = 'llama-3.3-70b-versatile', int $max_tokens = 300, array $history = []): ?string {
   $env     = loadEnv();
   $api_key = $env['GROQ_API_KEY'] ?? '';
   if (empty($api_key)) return null;
 
+  $messages = [['role' => 'system', 'content' => $system]];
+  foreach ($history as $h) {
+    $messages[] = ['role' => $h['role'] === 'bot' ? 'assistant' : 'user', 'content' => $h['content']];
+  }
+  $messages[] = ['role' => 'user', 'content' => $user];
+
   $data = [
-    'model'      => $model,
-    'max_tokens' => $max_tokens,
-    'messages'   => [
-      ['role' => 'system', 'content' => $system],
-      ['role' => 'user',   'content' => $user],
-    ]
+    'model'       => $model,
+    'max_tokens'  => $max_tokens,
+    'temperature' => 0.7,
+    'messages'    => $messages,
   ];
 
   $ch = curl_init('https://api.groq.com/openai/v1/chat/completions');
@@ -46,181 +50,377 @@ function callGroq(string $system, string $user, string $model = 'llama-3.3-70b-v
   return $decoded['choices'][0]['message']['content'] ?? null;
 }
 
-// ── Intent classifier ─────────────────────────────────────
-function classifyIntent(string $message, string $current_step, array $state): string {
-  $context = 'Current step: ' . $current_step . '. ';
-  if (!empty($state['income']))    $context .= 'Income: £' . $state['income'] . '. ';
-  if (!empty($state['expenses']))  $context .= 'Expenses: £' . $state['expenses'] . '. ';
-  if (!empty($state['savings']))   $context .= 'Savings: £' . $state['savings'] . '. ';
-  if (count($state['checks']) > 0) {
-    $last = end($state['checks']);
-    $context .= 'Last item checked: ' . $last['item_name'] . ' at £' . $last['item_price'] . '. Months to save: ' . $last['calc']['months_to_save'] . '. ';
-  }
+// - Extract structured facts from any message 
+// This is the key function - runs on every message to pull out
+// income, expenses, savings, item name, price, frequency
+function extractFacts(string $message, array $state, array $history = []): array {
+  $context = "Current known state: income=" . ($state['income'] ?? 'unknown')
+    . ", expenses=" . ($state['expenses'] ?? 'unknown')
+    . ", savings=" . ($state['savings'] ?? 'unknown')
+    . ", pending_item=" . ($state['pending_item'] ?? 'none')
+    . ", expected_next=" . ($state['expected_next'] ?? 'none') . ".";
 
-  $system = 'You are an intent classifier for a UK budget chatbot. Respond with ONLY one label from this list:
-- provide_price: user is giving a new item name and/or price to check affordability
-- custom_savings_calc: user wants to calculate based on a specific monthly savings amount they can actually save
-- express_concern: user is expressing doubt or worry about saving the full surplus
-- ask_question: user is asking a general question
-- comparison: user wants to compare two items
-- dream_goal: user is expressing emotional attachment to a goal or item
-- confirm: user is saying yes or confirming
-- stress_test: user wants to test what happens if income drops
-- other: anything else
+  $system = 'You are a fact extractor for a UK budget chatbot. Extract structured financial facts from the user message.
+
+Return ONLY a JSON object with these fields (use null if not present):
+{
+  "income": null,
+  "expenses": null,
+  "savings": null,
+  "item_name": null,
+  "item_price": null,
+  "item_type": null,
+  "is_correction": false,
+  "correcting_field": null
+}
 
 Rules:
-- "calculate based on X monthly" or "if I save X a month" or "I can only save X" = custom_savings_calc
-- "compare X and Y" or "which is better" = comparison
-- "I really want" or "dream" or "always wanted" = dream_goal
-- A number with words like "every month", "idk if I can save", "not sure if" = express_concern
-- A clear item name with price = provide_price
-Respond with ONLY the label, nothing else.';
+- income: monthly take-home pay in GBP (convert weekly*4.33, annual/12)
+- expenses: total monthly outgoings in GBP
+- savings: current savings amount in GBP
+- item_name: clean purchase name, no filler words (e.g. "Pilates subscription" not "thinking of getting pilates")
+- item_price: monthly cost if recurring, total cost if one-time, in GBP
+- item_type: "recurring" or "one-time" or null
+- For session-based costs: multiply by weekly frequency * 4.33 to get monthly
+- is_correction: true if user is correcting a previous figure
+- correcting_field: which field is being corrected (income/expenses/savings/item_price)
+- Convert k to thousands (5k = 5000)
+- If message says "50 per session once a week" -> item_price = 216.5 (50*4.33), item_type = recurring
+- If message says "50 per session twice a week" -> item_price = 433, item_type = recurring
+- Only extract what is clearly stated - do not guess
+- Return ONLY the JSON, no other text';
 
-  $result = callGroq($system, 'Context: ' . $context . "\nMessage: " . $message, 'llama-3.1-8b-instant', 20);
-  if (!$result) return 'other';
-  $result = strtolower(trim($result));
-  foreach (['provide_price', 'custom_savings_calc', 'express_concern', 'ask_question', 'comparison', 'dream_goal', 'confirm', 'stress_test'] as $label) {
-    if (str_contains($result, $label)) return $label;
-  }
-  return 'other';
+  $result = callGroq($system, "Context: " . $context . "\nMessage: " . $message, 'llama-3.1-8b-instant', 150, array_slice($history, -4));
+  if (!$result) return [];
+
+  $clean = trim(preg_replace('/```json|```/i', '', $result));
+  $data  = json_decode($clean, true);
+  return is_array($data) ? $data : [];
 }
 
-// ── Generative fallback ───────────────────────────────────
-function generateContextualReply(string $message, array $state): string {
-  $context = 'You are SmartSpend, a friendly UK budget assistant chatbot. You are NOT a financial advisor. ';
-  $context .= 'The user is in a conversation about their budget. ';
+// - Apply extracted facts to state 
+function applyFacts(array $facts, array &$state): array {
+  $updated = [];
 
-  if (!empty($state['income']))    $context .= 'Their monthly income is £' . $state['income'] . '. ';
-  if (!empty($state['expenses']))  $context .= 'Their monthly expenses are £' . $state['expenses'] . '. ';
-  if (!empty($state['savings']))   $context .= 'Their savings are £' . $state['savings'] . '. ';
+  if ($facts['is_correction'] ?? false) {
+    $field = $facts['correcting_field'] ?? null;
+    if ($field === 'income' && !empty($facts['income']))         { $state['income']    = $facts['income'];    $updated[] = 'income'; }
+    if ($field === 'expenses' && !empty($facts['expenses']))     { $state['expenses']  = $facts['expenses'];  $updated[] = 'expenses'; }
+    if ($field === 'savings' && isset($facts['savings']))        { $state['savings']   = $facts['savings'];   $updated[] = 'savings'; }
+    if ($field === 'item_price' && !empty($facts['item_price'])) { $state['item_price_override'] = $facts['item_price']; $updated[] = 'item_price'; }
+    return $updated;
+  }
+
+  if (!empty($facts['income']) && empty($state['income'])) {
+    $state['income'] = $facts['income'];
+    $updated[] = 'income';
+  }
+  if (!empty($facts['expenses']) && empty($state['expenses'])) {
+    $state['expenses'] = $facts['expenses'];
+    $updated[] = 'expenses';
+  }
+  if (isset($facts['savings']) && $facts['savings'] !== null && !isset($state['savings'])) {
+    $state['savings'] = $facts['savings'];
+    $updated[] = 'savings';
+  }
+  if (!empty($facts['item_name']) && empty($state['pending_item'])) {
+    $state['pending_item'] = $facts['item_name'];
+    $updated[] = 'item_name';
+  }
+  if (!empty($facts['item_price']) && empty($state['pending_price'])) {
+    $state['pending_price'] = $facts['item_price'];
+    $updated[] = 'item_price';
+  }
+  if (!empty($facts['item_type']) && empty($state['pending_type'])) {
+    $state['pending_type'] = $facts['item_type'];
+    $updated[] = 'item_type';
+  }
+
+  return $updated;
+}
+
+// - Check if we have enough data to calculate 
+
+function canCalculate(array $state): bool {
+  return !empty($state['income'])
+    && !empty($state['expenses'])
+    && isset($state['savings'])
+    && (!empty($state['pending_item']) || !empty($state['checks']))
+    && (!empty($state['pending_price']) || !empty($state['pending_item']));
+}
+
+// - What is the next missing field 
+function nextMissingField(array $state): ?string {
+  if (empty($state['income']))                        return 'income';
+  if (empty($state['expenses']))                      return 'expenses';
+  if (!isset($state['savings']))                      return 'savings';
+  if (empty($state['pending_item']) && empty($state['checks'])) return 'item';
+  if (empty($state['pending_price']))                 return 'item_price';
+  return null;
+}
+
+// - Build coach system prompt 
+function buildCoachPrompt(array $state): string {
+  $prompt = "You are SmartSpend, a friendly UK money coach and budget-aware conversational AI.
+
+You are warm, practical, encouraging, non-judgmental, and clear. You talk naturally but your special focus is budgeting, affordability, saving plans, and realistic financial goals.
+
+You are not a financial adviser. Do not give regulated financial, legal, medical, or investment advice. Use British English.
+
+CORE BEHAVIOUR:
+- Always understand and answer the user's latest message first
+- If the user corrects something, accept it immediately and naturally
+- If the user refers to something previous, use the stored context
+- If the user is emotional, respond with empathy before maths
+- If the user goes off-topic, answer briefly with personality then gently steer back
+- If the user mentions multiple items, treat them separately and compare
+- If the user asks about a loan or finance, explain interest implications
+- Keep replies concise - 2-4 sentences usually enough
+- Ask at most one question at the end
+- Sound human, not robotic
+
+NUMBER RULES:
+- If there is a pending item waiting for a price, a bare number is the item price
+- If user mentions income/salary/wage, the number is income
+- If user mentions expenses/bills/rent, the number is expenses
+- If user mentions savings/saved, the number is savings
+- For session costs: estimate monthly total and confirm with user
+
+IMPORTANT - CALCULATION TRIGGER:
+When you have collected income, expenses, savings, and item price, do NOT keep chatting.
+Instead end your reply with exactly: [READY_TO_CALCULATE]
+This tells the system to show the risk table.
+
+If one field is missing, ask for ONLY that specific field.
+
+STYLE:
+- Plain conversational British English
+- Concise but complete
+- No bullets unless they help
+- Always make the user feel heard\n\n";
+
+  $prompt .= "CURRENT USER BUDGET CONTEXT:\n";
+  if (!empty($state['income']))      $prompt .= "- Monthly income: £" . $state['income'] . "\n";
+  if (!empty($state['expenses']))    $prompt .= "- Monthly expenses: £" . $state['expenses'] . "\n";
+  if (isset($state['savings']))      $prompt .= "- Current savings: £" . $state['savings'] . "\n";
+  if (!empty($state['pending_item'])) $prompt .= "- Item being checked: " . $state['pending_item'] . "\n";
+  if (!empty($state['pending_price'])) $prompt .= "- Item price: £" . $state['pending_price'] . "\n";
+  if (!empty($state['pending_type'])) $prompt .= "- Item type: " . $state['pending_type'] . "\n";
+  if (!empty($state['pending_goal'])) $prompt .= "- User originally asked about: " . $state['pending_goal'] . "\n";
   if (!empty($state['income']) && !empty($state['expenses'])) {
     $surplus = $state['income'] - $state['expenses'];
-    $context .= 'Their monthly surplus is £' . $surplus . '. ';
+    $prompt .= "- Monthly surplus: £" . $surplus . "\n";
   }
+  if (!empty($state['checks'])) {
+    $prompt .= "- Items checked this session:\n";
+    foreach ($state['checks'] as $c) {
+      $m = $c['calc']['months_to_save'];
+      $y = floor($m / 12); $mo = $m % 12;
+      $t = $y > 0 ? $y . 'yr' . ($mo > 0 ? ' ' . $mo . 'mo' : '') : $m . 'mo';
+      $prompt .= "  * " . $c['item_name'] . " £" . number_format($c['item_price'], 2) . " - " . $c['risk_level'] . " risk - " . $t . " to save\n";
+    }
+  }
+  $prompt .= "- Current flow step: " . ($state['step'] ?? 'greeting') . "\n";
+
+  return $prompt;
+}
+
+// - Generate coach reply 
+function generateCoachReply(string $message, array $state, array $history = [], string $extra_context = ''): string {
+  $system = buildCoachPrompt($state);
+  if ($extra_context) $system .= "\nEXTRA CONTEXT: " . $extra_context . "\n";
+  $result = callGroq($system, $message, 'llama-3.3-70b-versatile', 300, array_slice($history, -10));
+  return $result ?? "I am having a moment - could you say that again?";
+}
+
+// - Classify message intent 
+function classifyMessage(string $message, array $state, array $history = []): string {
+  $context = "Step: " . ($state['step'] ?? 'greeting') . ". ";
+  if (!empty($state['income']))        $context .= "Income: £" . $state['income'] . ". ";
+  if (!empty($state['expenses']))      $context .= "Expenses: £" . $state['expenses'] . ". ";
+  if (isset($state['savings']))        $context .= "Savings: £" . $state['savings'] . ". ";
+  if (!empty($state['pending_item']))  $context .= "Pending item: " . $state['pending_item'] . ". ";
+  if (!empty($state['expected_next'])) $context .= "Bot last asked for: " . $state['expected_next'] . ". ";
+
+  $system = 'Classify the user message for a UK budget chatbot. Reply with ONE label only.
+
+Labels:
+- correction: user fixing a previous figure
+- income_figure: giving income amount
+- expenses_figure: giving expenses amount
+- savings_figure: giving savings amount
+- item_price: giving price for a pending item
+- affordability_request: asking to check one item with its price
+- multi_item: mentions two or more items or options
+- item_without_price: mentions one item they want but no price
+- subscription_request: asking about ongoing recurring cost
+- comparison: wants to compare two items
+- custom_savings_calc: gives a specific monthly saving amount
+- stress_test: wants to simulate income drop
+- reference_previous: refers to a previously discussed item
+- loan_question: asking about borrowing or finance
+- emotional_reaction: expressing feelings about money or goals
+- complaint: says bot is wrong or not listening
+- memory_check: asks what the bot has stored
+- refusal_or_unknown: says they do not know a number
+- off_topic: unrelated to money
+- normal_chat: casual chat or general finance question
+- reset_request: wants to start over
+- greeting: simple hello
+
+Reply with ONLY the label.';
+
+  $result = callGroq($system, "Context: " . $context . "\nMessage: " . $message, 'llama-3.1-8b-instant', 15, array_slice($history, -4));
+  if (!$result) return 'normal_chat';
+  return strtolower(trim(preg_replace('/[^a-z_]/', '', $result)));
+}
+
+// - Multi-item extraction 
+function extractItemsFromMessage(string $message, array $state, array $history = []): array {
+  $system = 'Extract all purchase items from the user message. Return ONLY a JSON array:
+[{"name":"item name","price":1000,"type":"one-time"},{"name":"other item","price":50,"type":"recurring"}]
+- Clean item names: remove filler words
+- type: "recurring" if monthly/weekly, otherwise "one-time"
+- price: number in GBP, convert k to thousands, null if unknown
+- Return [] if no items found
+Return ONLY the JSON array.';
+
+  $result = callGroq($system, $message, 'llama-3.1-8b-instant', 150, []);
+  if (!$result) return [];
+  $clean = trim(preg_replace('/```json|```/i', '', $result));
+  $data  = json_decode($clean, true);
+  return is_array($data) ? $data : [];
+}
+
+// - Multi-item coaching response 
+function generateMultiItemResponse(array $items, array $state, array $history = [], string $original_message = ''): string {
+  $income   = $state['income'] ?? 0;
+  $expenses = $state['expenses'] ?? 0;
+  $savings  = $state['savings'] ?? 0;
+  $surplus  = $income - $expenses;
+
+  $ctx = "User mentioned multiple items:\n";
+  foreach ($items as $item) {
+    if (!empty($item['price'])) {
+      $months = $item['price'] > $savings && $surplus > 0 ? (int) ceil(($item['price'] - $savings) / $surplus) : 0;
+      $y = floor($months / 12); $mo = $months % 12;
+      $time = $y > 0 ? $y . ' year' . ($y > 1 ? 's' : '') . ($mo > 0 ? ' and ' . $mo . ' months' : '') : $months . ' months';
+      $ctx .= "- " . $item['name'] . ": £" . number_format($item['price'], 2) . " (" . ($item['type'] ?? 'one-time') . ") - " . $time . " to save\n";
+    } else {
+      $ctx .= "- " . $item['name'] . ": price unknown\n";
+    }
+  }
+  $ctx .= "Surplus: £" . number_format($surplus, 2) . "/month. Savings: £" . number_format($savings, 2) . ".\n";
+
+  $has_loan = preg_match('/loan|finance|credit|borrow/i', $original_message);
+  if ($has_loan) $ctx .= "User asked about loan/finance. Explain interest risk, show saving as alternative. ";
+  $ctx .= "Give warm practical coaching: compare items, recommend which to prioritise, one clear next step. 3-4 sentences.";
+
+  return generateCoachReply($original_message, $state, $history, $ctx);
+}
+
+// - Comparison 
+function generateComparison(array $checks, array $state, array $history = []): string {
+  if (count($checks) < 2) return "I only have one item checked so far. What would you like to compare it with?";
+  $last = $checks[count($checks) - 1];
+  $prev = $checks[count($checks) - 2];
+
+  $fmt = function(int $m): string {
+    if ($m <= 0) return 'already affordable';
+    $y = floor($m / 12); $mo = $m % 12;
+    return $y > 0 ? $y . ' year' . ($y > 1 ? 's' : '') . ($mo > 0 ? ' and ' . $mo . ' months' : '') : $m . ' month' . ($m > 1 ? 's' : '');
+  };
+  $rl = fn(string $r) => $r === 'green' ? 'low risk' : ($r === 'yellow' ? 'moderate risk' : 'high risk');
+
+  $extra = "Compare:\n1. " . $prev['item_name'] . " £" . number_format($prev['item_price'], 2) . " - " . $rl($prev['risk_level']) . " - " . $fmt($prev['calc']['months_to_save']) . " to save\n"
+    . "2. " . $last['item_name'] . " £" . number_format($last['item_price'], 2) . " - " . $rl($last['risk_level']) . " - " . $fmt($last['calc']['months_to_save']) . " to save\n"
+    . "Surplus: £" . (($state['income'] ?? 0) - ($state['expenses'] ?? 0)) . "/month. Savings: £" . ($state['savings'] ?? 0) . ".\n"
+    . "Warm comparison with clear verdict. 3-4 sentences.";
+
+  return generateCoachReply("Compare these items.", $state, $history, $extra);
+}
+
+// - Find previous check by keyword 
+function findPreviousCheck(string $message, array $checks): ?array {
+  if (empty($checks)) return null;
+  $lower = strtolower($message);
+  foreach (array_reverse($checks) as $check) {
+    foreach (explode(' ', strtolower($check['item_name'])) as $word) {
+      if (strlen($word) > 2 && str_contains($lower, $word)) return $check;
+    }
+  }
+  return null;
+}
+
+// - Custom savings calculation 
+function generateCustomSavingsCalc(float $monthly_saving, array $state, array $history = []): string {
+  if (count($state['checks']) > 0) {
+    $last   = end($state['checks']);
+    $ip     = $last['item_price'];
+    $iname  = $last['item_name'];
+    $sv     = $state['savings'] ?? 0;
+    if ($monthly_saving <= 0) return "That saving rate would not make progress. Let us find an amount that works.";
+    $months = (int) ceil(($ip - $sv) / $monthly_saving);
+    $y      = floor($months / 12); $mo = $months % 12;
+    $time   = $y > 0 ? $y . ' year' . ($y > 1 ? 's' : '') . ($mo > 0 ? ' and ' . $mo . ' months' : '') : $months . ' months';
+    $extra  = "User saving £" . number_format($monthly_saving, 2) . "/month toward " . $iname . " at £" . number_format($ip, 2) . ". Have £" . number_format($sv, 2) . " saved. Timeline: " . $time . ". Confirm warmly, show month 1/3/6 milestones, encourage. 3 sentences.";
+    return generateCoachReply("Calculate my savings at £" . number_format($monthly_saving, 2) . "/month.", $state, $history, $extra);
+  }
+  return "I do not have an item to calculate toward yet. What are you saving for?";
+}
+
+// - Savings concern 
+function generateSavingsConcern(string $message, array $state, array $history = []): string {
+  $surplus = ($state['income'] ?? 0) - ($state['expenses'] ?? 0);
   if (count($state['checks']) > 0) {
     $last = end($state['checks']);
-    $context .= 'They last checked affordability of ' . $last['item_name'] . ' at £' . $last['item_price'] . ' with a ' . $last['risk_level'] . ' risk level and ' . $last['calc']['months_to_save'] . ' months to save. ';
+    $ip   = $last['item_price'];
+    $sv   = $state['savings'] ?? 0;
+    $r80  = $surplus * 0.8;
+    $r50  = $surplus * 0.5;
+    $fmt  = function(float $rate) use ($ip, $sv): string {
+      if ($rate <= 0) return 'not achievable';
+      $m = (int) ceil(($ip - $sv) / $rate);
+      $y = floor($m / 12); $mo = $m % 12;
+      return $y > 0 ? $y . 'yr' . ($mo > 0 ? ' ' . $mo . 'mo' : '') : $m . 'mo';
+    };
+    $extra = "User worried about saving full £" . number_format($surplus, 2) . "/month toward " . $last['item_name'] . " at £" . number_format($ip, 2) . ". At 80% (£" . number_format($r80, 2) . "/mo): " . $fmt($r80) . ". At 50% (£" . number_format($r50, 2) . "/mo): " . $fmt($r50) . ". Validate warmly, show scenarios, offer specific amount calculation.";
+    return generateCoachReply($message, $state, $history, $extra);
   }
-
-  $system = $context
-    . 'The user has said something that does not match a standard flow. '
-    . 'Respond naturally and helpfully in 2-3 sentences max. '
-    . 'Always gently steer back toward their budget goal or offer to check something specific. '
-    . 'Be warm, encouraging and non-judgmental. '
-    . 'Never give specific investment or legal advice. '
-    . 'Never make up financial figures not given to you. '
-    . 'End with a short question or offer to help with something specific.';
-
-  $result = callGroq($system, $message, 'llama-3.3-70b-versatile', 120);
-  return $result ?? "That is a great point. Would you like to check another item, run a stress test on your finances, or explore how to reach your savings goal faster?";
+  return generateCoachReply($message, $state, $history);
 }
 
-// ── Typo correction ───────────────────────────────────────
+// - AI explanation for result card 
+function getAIExplanation(string $context, string $risk_level, array $history = []): string {
+  $system = "You are SmartSpend, a friendly UK money coach. Write exactly 2 short sentences using ONLY the numbers explicitly given. Do NOT invent figures. Do NOT say 'some months' - use the exact month count. Sentence 1: state risk and key numbers. Sentence 2: one practical encouraging tip. No specific financial products.";
+  $result = callGroq($system, "Context: " . $context . "\nRisk: " . $risk_level . ". Two sentences only.", 'llama-3.3-70b-versatile', 100, []);
+  return $result ?? buildFallbackExplanation($risk_level);
+}
+
+function buildFallbackExplanation(string $risk_level): string {
+  if ($risk_level === 'green')  return "You are in a strong position to afford this. Keep up your surplus and build your emergency fund.";
+  if ($risk_level === 'yellow') return "You can afford this but it will take time. Stay consistent with your monthly surplus.";
+  return "This purchase would put significant pressure on your budget. Consider reducing expenses or waiting until savings have grown.";
+}
+
+// - Typo correction 
 function correctTypos(string $msg): string {
   $corrections = [
-    'monet' => 'money', 'mony' => 'money', 'monney' => 'money',
+    'monet' => 'money', 'mony' => 'money',
     'budgte' => 'budget', 'buget' => 'budget',
-    'expences' => 'expenses', 'expeses' => 'expenses', 'expnses' => 'expenses',
-    'savigns' => 'savings', 'savinsg' => 'savings', 'savins' => 'savings',
+    'expences' => 'expenses', 'expeses' => 'expenses',
+    'savigns' => 'savings', 'savinsg' => 'savings',
     'incone' => 'income', 'incomme' => 'income',
     'affort' => 'afford', 'aford' => 'afford',
-    'dept' => 'debt', 'dbet' => 'debt',
     'mortage' => 'mortgage', 'morgage' => 'mortgage',
-    'apartement' => 'apartment', 'appartment' => 'apartment', 'aparment' => 'apartment',
-    'subsciption' => 'subscription', 'subscirption' => 'subscription', 'subcription' => 'subscription',
+    'subsciption' => 'subscription', 'subscirption' => 'subscription',
     'salarey' => 'salary', 'salery' => 'salary',
   ];
-  $words  = explode(' ', $msg);
-  $result = [];
+  $words = explode(' ', $msg);
+  $out   = [];
   foreach ($words as $word) {
-    $lower    = strtolower(trim($word, '.,!?'));
-    $result[] = isset($corrections[$lower]) ? $corrections[$lower] : $word;
+    $lower = strtolower(trim($word, '.,!?'));
+    $out[] = isset($corrections[$lower]) ? $corrections[$lower] : $word;
   }
-  return implode(' ', $result);
-}
-
-// ── Savings concern handler ───────────────────────────────
-function handleSavingsConcern(string $message, array $state): string {
-  $surplus = $state['income'] - $state['expenses'];
-  if (count($state['checks']) > 0) {
-    $last_check  = end($state['checks']);
-    $item_price  = $last_check['item_price'];
-    $reduced_80  = $surplus * 0.8;
-    $reduced_50  = $surplus * 0.5;
-    $months_80   = $reduced_80 > 0 ? (int) ceil(($item_price - $state['savings']) / $reduced_80) : 0;
-    $months_50   = $reduced_50 > 0 ? (int) ceil(($item_price - $state['savings']) / $reduced_50) : 0;
-    $format = function(int $m): string {
-      if ($m <= 0) return 'not achievable at this rate';
-      $y  = floor($m / 12);
-      $mo = $m % 12;
-      if ($y > 0) return $y . ' year' . ($y > 1 ? 's' : '') . ($mo > 0 ? ' and ' . $mo . ' month' . ($mo > 1 ? 's' : '') : '');
-      return $m . ' month' . ($m > 1 ? 's' : '');
-    };
-    return "That is a valid concern - unexpected costs happen and it is unlikely you will save the full £" . number_format($surplus, 2) . " every single month.\n\n"
-         . "Here is how the timeline changes if your actual savings are lower:\n\n"
-         . "- Saving 80% (£" . number_format($reduced_80, 2) . "/month): " . $format($months_80) . "\n"
-         . "- Saving 50% (£" . number_format($reduced_50, 2) . "/month): " . $format($months_50) . "\n\n"
-         . "If you have a specific monthly amount in mind you can actually save, just tell me and I will calculate it exactly for you.";
-  }
-  return "That is a completely valid concern. Unexpected costs happen and it is unlikely you will save the maximum every month. If you have a specific monthly savings amount in mind, tell me and I will calculate how long it would take.";
-}
-
-// ── Custom savings calculation ────────────────────────────
-function handleCustomSavingsCalc(float $monthly_saving, array $state): string {
-  if (count($state['checks']) > 0) {
-    $last       = end($state['checks']);
-    $item_price = $last['item_price'];
-    $item_name  = $last['item_name'];
-    $savings    = $state['savings'];
-
-    if ($monthly_saving <= 0) {
-      return "That saving rate would not be enough to reach your goal. Try to find ways to increase your monthly savings.";
-    }
-
-    $months_needed = (int) ceil(($item_price - $savings) / $monthly_saving);
-    $years         = floor($months_needed / 12);
-    $mo            = $months_needed % 12;
-
-    if ($years > 0) {
-      $time_str = $years . ' year' . ($years > 1 ? 's' : '') . ($mo > 0 ? ' and ' . $mo . ' month' . ($mo > 1 ? 's' : '') : '');
-    } else {
-      $time_str = $months_needed . ' month' . ($months_needed > 1 ? 's' : '');
-    }
-
-    $projection = [];
-    for ($i = 1; $i <= min(3, $months_needed); $i++) {
-      $projection[] = 'Month ' . $i . ': £' . number_format($savings + ($monthly_saving * $i), 2);
-    }
-
-    return "Based on saving £" . number_format($monthly_saving, 2) . " per month, here is how it looks for the " . $item_name . ":\n\n"
-         . "- Time to reach £" . number_format($item_price, 2) . ": approximately " . $time_str . "\n"
-         . "- Starting from your current savings of £" . number_format($savings, 2) . "\n\n"
-         . (count($projection) > 0 ? implode("\n", $projection) . "\n\n" : '')
-         . "That is still a realistic goal - even saving less than your full surplus gets you there.";
-  }
-  return "I do not have an item to calculate against yet. What are you saving for and how much does it cost?";
-}
-
-// ── AI explanation ────────────────────────────────────────
-function getAIExplanation(string $context, string $risk_level): string {
-  $system = 'You are SmartSpend, a friendly UK budget assistant. You are NOT a financial advisor. '
-          . 'Write exactly 2 short sentences using ONLY the numbers explicitly given. '
-          . 'Do NOT calculate, invent, or approximate any figures not explicitly stated. '
-          . 'Do NOT use vague phrases like "some months" - always use the exact months figure given. '
-          . 'Sentence 1: state the risk level and key figures plainly. '
-          . 'Sentence 2: one short encouraging practical tip. '
-          . 'Never mention specific financial products.';
-
-  $result = callGroq($system, 'Context: ' . $context . "\nRisk: " . $risk_level . '. Write 2 sentences only using exact figures given.');
-  return $result ?? buildFallbackExplanation($context, $risk_level);
-}
-
-function buildFallbackExplanation(string $context, string $risk_level): string {
-  if ($risk_level === 'green') {
-    return "You are in a strong position to afford this based on your current finances. Keep maintaining your surplus and consider building up your emergency fund if you have not already.";
-  } elseif ($risk_level === 'yellow') {
-    return "You can afford this but it will take some time to save up. Stay consistent with your monthly surplus and you will get there.";
-  } else {
-    return "Based on your current finances this purchase would put significant pressure on your budget. Consider reducing monthly expenses or waiting until your savings have grown before committing.";
-  }
+  return implode(' ', $out);
 }

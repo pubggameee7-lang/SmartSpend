@@ -4,9 +4,7 @@ require_once 'ai.php';
 
 header('Content-Type: application/json');
 
-if (session_status() === PHP_SESSION_NONE) {
-  session_start();
-}
+if (session_status() === PHP_SESSION_NONE) session_start();
 
 if (!isset($_SESSION['user_id'])) {
   http_response_code(401);
@@ -18,643 +16,515 @@ $user_id     = $_SESSION['user_id'];
 $raw_message = trim($_POST['message'] ?? '');
 $session_id  = intval($_POST['session_id'] ?? 0);
 
-if ($raw_message === '') {
-  echo json_encode(['success' => false, 'error' => 'Message cannot be empty.']);
-  exit;
-}
-
-if ($session_id === 0) {
-  echo json_encode(['success' => false, 'error' => 'Invalid session.']);
-  exit;
-}
+if ($raw_message === '') { echo json_encode(['success'=>false,'error'=>'Empty message.']); exit; }
+if ($session_id === 0)   { echo json_encode(['success'=>false,'error'=>'Invalid session.']); exit; }
 
 $db      = getDB();
 $message = correctTypos(trim($raw_message));
+$lower   = strtolower(trim($message));
 
 $stmt = $db->prepare('INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)');
 $stmt->execute([$session_id, 'user', $raw_message]);
 
 $stmt = $db->prepare('SELECT state FROM conversation_state WHERE session_id = ?');
 $stmt->execute([$session_id]);
-$row = $stmt->fetch();
+$row  = $stmt->fetch();
 
 $state = $row ? json_decode($row['state'], true) : [
   'step'                  => 'greeting',
   'income'                => null,
   'expenses'              => null,
   'savings'               => null,
+  'active_goal'           => null,
+  'loan'                  => null,
+  'subscriptions'         => [],
   'checks'                => [],
-  'pending_item'          => null,
-  'pending_price'         => null,
-  'pending_type'          => null,
-  'pending_sub'           => null,
-  'pending_goal'          => null,
-  'expected_next'         => null,
   'emergency_fund_warned' => false,
 ];
 
-foreach (['pending_sub', 'pending_goal', 'expected_next', 'pending_price', 'pending_type'] as $k) {
-  if (!isset($state[$k])) $state[$k] = null;
+foreach (['active_goal','loan','subscriptions','checks'] as $k) {
+  if (!isset($state[$k])) $state[$k] = in_array($k, ['subscriptions','checks']) ? [] : null;
 }
 
 $stmt = $db->prepare('SELECT role, content FROM messages WHERE session_id = ? ORDER BY created_at DESC LIMIT 16');
 $stmt->execute([$session_id]);
 $history_raw = array_reverse($stmt->fetchAll());
-$history     = array_values(array_filter($history_raw, fn($m) => !($m['role'] === 'user' && $m['content'] === $raw_message)));
-
-function extractNumber(string $msg): ?float {
-  $cleaned = str_replace([',', '£', '$', '€', '%'], '', $msg);
-  $num     = null;
-  if (preg_match('/(\d+(\.\d{1,2})?)\s*k/i', $cleaned, $km)) {
-    $num = floatval($km[1]) * 1000;
-  } elseif (preg_match('/\d+(\.\d{1,2})?/', $cleaned, $matches)) {
-    $num = floatval($matches[0]);
+$history = array_values(array_filter($history_raw, function($m) use ($raw_message) {
+  // Remove current user message (already being sent separately)
+  if ($m['role'] === 'user' && $m['content'] === $raw_message) return false;
+  // Strip calculation lines from bot messages so LLM cannot re-reason from them
+  if ($m['role'] === 'bot') {
+    $m['content'] = preg_replace('/\n\nLoan repayment:.*$/s', '', $m['content']);
+    $m['content'] = preg_replace('/\n\nSaving £.*\.$/s', '', $m['content']);
+    $m['content'] = preg_replace('/\n\nWith reduced expenses.*\.$/s', '', $m['content']);
+    $m['content'] = preg_replace('/\n\nWith new income.*\.$/s', '', $m['content']);
   }
-  if ($num !== null && preg_match('/per week|weekly|a week|each week|\/week/i', $msg)) {
-    $num = round($num * 4.33, 2);
-  }
-  return $num;
-}
+  return true;
+}));
 
-function isRecurring(string $msg): bool {
-  return (bool) preg_match('/per month|monthly|\/mo|subscription|recurring|per week|weekly|session|class/i', $msg);
-}
-
-function cleanItemName(string $msg): string {
-  $name = preg_replace('/£?[\d,]+(\.\d{1,2})?\s*k?/i', '', $msg);
-  $name = preg_replace('/\b(hmm+|um+|uh+|a|an|the|for|at|to|buy|buying|get|getting|myself|yourself|want|need|afford|per|month|monthly|week|weekly|costs?|priced?|is|was|id like|i want|thinking of|im thinking|can i|could i|how about|purchase|no|its|my|idk|if|every|though|think|with|we|last|talked|about|previous|earlier|before|that|same|check|can|afford|new|some|just|going to|gonna|would like|like to|treat|myself to)\b/i', ' ', $name);
-  $name = trim(preg_replace('/\s+/', ' ', $name));
-  return strlen($name) > 1 ? $name : 'item';
-}
-
-function formatMonths(int $months): string {
-  if ($months <= 0) return 'already affordable';
-  $y  = floor($months / 12);
-  $mo = $months % 12;
-  if ($y > 0) return $y . ' year' . ($y > 1 ? 's' : '') . ($mo > 0 ? ' and ' . $mo . ' months' : '');
-  return $months . ' month' . ($months > 1 ? 's' : '');
-}
-
-function hasMultipleItems(string $msg): bool {
-  $andCount = substr_count(strtolower($msg), ' and ');
-  return $andCount >= 1 && preg_match('/\d/', $msg) && preg_match('/\b(bag|retreat|holiday|car|phone|laptop|watch|shoes|dress|jacket|ring|sofa|tv)\b/i', $msg);
-}
-
-function calculate(float $income, float $expenses, float $savings, float $item_price, string $item_type): array {
-  $surplus = $income - $expenses;
-
-  if ($item_type === 'recurring') {
-    $surplus_after  = $surplus - $item_price;
-    $months_to_save = 0;
-    $projections    = [];
-    for ($i = 1; $i <= 3; $i++) {
-      $projections['month_' . $i] = round($savings + ($surplus_after * $i), 2);
-    }
-  } else {
-    $surplus_after  = $surplus;
-    $months_to_save = ($item_price > $savings && $surplus > 0)
-      ? (int) ceil(($item_price - $savings) / $surplus)
-      : 0;
-    $projections = [];
-    if ($months_to_save <= 3) {
-      for ($i = 1; $i <= 3; $i++) {
-        $projections['month_' . $i] = round($savings + ($surplus * $i), 2);
-      }
-    } elseif ($months_to_save <= 12) {
-      for ($i = 1; $i <= $months_to_save; $i++) {
-        $projections['month_' . $i] = round($savings + ($surplus * $i), 2);
-      }
-    } else {
-      $y   = floor($months_to_save / 12);
-      $rem = $months_to_save % 12;
-      $projections['summary'] = 'Approximately ' . $y . ' year' . ($y > 1 ? 's' : '') .
-        ($rem > 0 ? ' and ' . $rem . ' months' : '');
-    }
-  }
-
-  $er = ($income > 0) ? ($expenses / $income) : 1;
-
-  if ($item_type === 'recurring') {
-    if ($surplus_after >= $surplus * 0.4 && $er < 0.7) $risk = 'green';
-    elseif ($surplus_after >= 0 && $er < 0.85)         $risk = 'yellow';
-    else                                                 $risk = 'red';
-  } else {
-    if ($savings >= $item_price && $surplus > 0)         $risk = 'green';
-    elseif ($surplus > 0 && $months_to_save <= 12)       $risk = 'yellow';
-    else                                                  $risk = 'red';
-  }
-
-  $health = 100;
-  if ($er > 0.9)      $health -= 40;
-  elseif ($er > 0.7)  $health -= 20;
-  elseif ($er > 0.5)  $health -= 10;
-  if ($savings < $income) $health -= 20;
-  if ($surplus <= 0)      $health -= 30;
-  if ($risk === 'red')    $health -= 20;
-  elseif ($risk === 'yellow') $health -= 10;
-  $health = max(0, min(100, $health));
-
-  $ef = round($expenses * 3, 2);
-  if ($item_type === 'recurring') {
-    if ($risk === 'green')      $sug = 'You can comfortably afford this. Surplus after cost: £' . number_format($surplus_after, 2) . '.';
-    elseif ($risk === 'yellow') $sug = 'Affordable but reduces surplus to £' . number_format($surplus_after, 2) . '.';
-    else                        $sug = 'This recurring cost would put your finances under pressure.';
-  } elseif ($risk === 'red' && $surplus > 0) {
-    $sug = 'To afford this in 6 months save an extra £' . round(($item_price - $savings) / 6, 2) . '/month.';
-  } elseif ($risk === 'red') {
-    $sug = 'Expenses exceed income so saving for this is not possible right now.';
-  } elseif ($risk === 'yellow') {
-    $sug = 'Consider setting aside £' . round($item_price / max($months_to_save, 1), 2) . '/month to reach your goal faster.';
-  } else {
-    $sug = 'Make sure you have at least 3 months of expenses (£' . $ef . ') as an emergency fund.';
-  }
-
-  return [
-    'surplus'        => round($surplus, 2),
-    'surplus_after'  => round($surplus_after, 2),
-    'months_to_save' => $months_to_save,
-    'risk_level'     => $risk,
-    'health_score'   => $health,
-    'expense_ratio'  => round($er * 100, 1),
-    'suggestion'     => $sug,
-    'projections'    => $projections,
-  ];
-}
-
-function emergencyFundWarning(float $savings, float $expenses): ?string {
-  $recommended = $expenses * 3;
-  if ($savings < $recommended) {
-    return 'Your savings of £' . number_format($savings, 2) . ' are below the recommended 3-month emergency fund of £' . number_format($recommended, 2) . '.';
-  }
-  return null;
-}
-
-function saveResult(PDO $db, int $session_id, int $user_id, array $state, string $item_name, float $item_price, string $item_type, array $calc): void {
-  $stmt = $db->prepare('INSERT INTO budgets (session_id, income, expenses, savings) VALUES (?, ?, ?, ?)');
-  $stmt->execute([$session_id, $state['income'], $state['expenses'], $state['savings']]);
-  $stmt = $db->prepare('INSERT INTO assessments (session_id, item_name, item_price, item_type, risk_level, surplus, surplus_after, months_to_save) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
-  $stmt->execute([$session_id, $item_name, $item_price, $item_type, $calc['risk_level'], $calc['surplus'], $calc['surplus_after'], $calc['months_to_save']]);
-  $stmt = $db->prepare('INSERT INTO health_scores (user_id, score, trend) VALUES (?, ?, ?)');
-  $stmt->execute([$user_id, $calc['health_score'], 'stable']);
-}
-
-function runCalculation(PDO $db, int $session_id, int $user_id, array &$state, string $item_name, float $price, string $item_type, array $history): array {
-  $calc = calculate($state['income'], $state['expenses'], $state['savings'], $price, $item_type);
-  saveResult($db, $session_id, $user_id, $state, $item_name, $price, $item_type, $calc);
-
-  $state['checks'][]      = ['item_name' => $item_name, 'item_price' => $price, 'item_type' => $item_type, 'risk_level' => $calc['risk_level'], 'calc' => $calc];
-  $state['pending_item']  = null;
-  $state['pending_price'] = null;
-  $state['pending_type']  = null;
-  $state['pending_goal']  = null;
-  $state['expected_next'] = null;
-  $state['step']          = 'followup';
-
-  $ai_ctx  = 'Income: £' . $state['income'] . '. Expenses: £' . $state['expenses'] . '. Savings: £' . $state['savings'] . '. Item: ' . $item_name . ' at £' . $price . ' (' . $item_type . '). Surplus: £' . $calc['surplus'] . '. Surplus after: £' . $calc['surplus_after'] . '. Risk: ' . $calc['risk_level'] . '. Months to save: ' . $calc['months_to_save'] . '.';
-  $ai_text = getAIExplanation($ai_ctx, $calc['risk_level'], $history);
-  $label   = $calc['risk_level'] === 'green' ? 'Good news' : ($calc['risk_level'] === 'yellow' ? 'Heads up' : 'Warning');
-
-  return [
-    $label . ' - here is your result for ' . $item_name . ".\n\n" . $ai_text,
-    array_merge($calc, ['item_name' => $item_name, 'item_price' => $price, 'item_type' => $item_type])
-  ];
-}
-
-function saveAndRespond(PDO $db, int $session_id, array $state, string $bot_reply, ?array $calculation, array $quick_replies): void {
-  $stmt = $db->prepare('INSERT INTO conversation_state (session_id, state) VALUES (?, ?) ON DUPLICATE KEY UPDATE state = VALUES(state), updated_at = NOW()');
-  $stmt->execute([$session_id, json_encode($state)]);
+// ── Output helper ──────────────────────────────────────────
+function respond(PDO $db, int $sid, array $state, string $reply, ?array $calc, array $qr): void {
+  $stmt = $db->prepare('INSERT INTO conversation_state (session_id, state) VALUES (?, ?) ON DUPLICATE KEY UPDATE state=VALUES(state), updated_at=NOW()');
+  $stmt->execute([$sid, json_encode($state)]);
   $stmt = $db->prepare('INSERT INTO messages (session_id, role, content, calculation) VALUES (?, ?, ?, ?)');
-  $stmt->execute([$session_id, 'bot', $bot_reply, $calculation ? json_encode($calculation) : null]);
-  echo json_encode(['success' => true, 'bot_reply' => $bot_reply, 'calculation' => $calculation, 'quick_replies' => $quick_replies, 'step' => $state['step']]);
+  $stmt->execute([$sid, 'bot', $reply, $calc ? json_encode($calc) : null]);
+  echo json_encode(['success'=>true,'bot_reply'=>$reply,'calculation'=>$calc,'quick_replies'=>$qr,'step'=>$state['step']]);
   exit;
 }
 
-$price         = extractNumber($message);
-$lower         = strtolower(trim($message));
-$bot_reply     = '';
-$calculation   = null;
-$quick_replies = ['Check another item', 'Run a stress test', 'Reset budget', 'Other'];
-$budget_complete = !empty($state['income']) && !empty($state['expenses']) && isset($state['savings']);
+// ── Run and store a full affordability calculation ─────────
+function runCalc(PDO $db, int $sid, int $uid, array &$state, string $name, float $cost, string $type, array $history): array {
+  $calc = calculate($state['income'], $state['expenses'], $state['savings'], $cost, $type);
+
+  $db->prepare('INSERT INTO budgets (session_id,income,expenses,savings) VALUES (?,?,?,?)')->execute([$sid,$state['income'],$state['expenses'],$state['savings']]);
+  $db->prepare('INSERT INTO assessments (session_id,item_name,item_price,item_type,risk_level,surplus,surplus_after,months_to_save) VALUES (?,?,?,?,?,?,?,?)')->execute([$sid,$name,$cost,$type,$calc['risk_level'],$calc['surplus'],$calc['surplus_after'],$calc['months_to_save']]);
+  $db->prepare('INSERT INTO health_scores (user_id,score,trend) VALUES (?,?,?)')->execute([$uid,$calc['health_score'],'stable']);
+
+  $state['checks'][] = ['item_name'=>$name,'item_price'=>$cost,'item_type'=>$type,'risk_level'=>$calc['risk_level'],'calc'=>$calc];
+
+  $label  = $calc['risk_level']==='green' ? 'Good news' : ($calc['risk_level']==='yellow' ? 'Heads up' : 'Warning');
+  $ai_ctx = "Income: £{$state['income']}. Expenses: £{$state['expenses']}. Savings: £{$state['savings']}. Item: {$name} at £".number_format($cost,2)." ({$type}). Surplus: £{$calc['surplus']}. Risk: {$calc['risk_level']}. Months to save: {$calc['months_to_save']}.";
+  $ai     = getAIExplanation($ai_ctx, $calc['risk_level']);
+
+  return [
+    'label'       => $label,
+    'name'        => $name,
+    'ai_text'     => $ai,
+    'calculation' => array_merge($calc, ['item_name'=>$name,'item_price'=>$cost,'item_type'=>$type]),
+  ];
+}
+
+// ═══════════════════════════════════════════════════════════
+// CONTROL LOOP START
+// ═══════════════════════════════════════════════════════════
 
 // Hard reset
 if (preg_match('/^(reset|start over|restart)$/i', $lower)) {
-  $state = ['step' => 'income', 'income' => null, 'expenses' => null, 'savings' => null, 'checks' => [], 'pending_item' => null, 'pending_price' => null, 'pending_type' => null, 'pending_sub' => null, 'pending_goal' => null, 'expected_next' => null, 'emergency_fund_warned' => false];
-  saveAndRespond($db, $session_id, $state, "No problem - let's start fresh. What is your monthly income after tax?", null, ['£1500', '£2000', '£2500', '£3000', 'Other']);
+  $state = ['step'=>'greeting','income'=>null,'expenses'=>null,'savings'=>null,'active_goal'=>null,'loan'=>null,'subscriptions'=>[],'checks'=>[],'emergency_fund_warned'=>false];
+  respond($db,$session_id,$state,"No problem - let's start fresh. What is your monthly income after tax?",null,['£1500','£2000','£2500','£3000','Other']);
 }
 
-// Subscription flow
-if (in_array($state['step'], ['sub_name', 'sub_price', 'sub_frequency', 'sub_duration'])) {
-  if ($state['step'] === 'sub_name') {
-    $sub_name = trim($message);
-    if (strlen($sub_name) < 2 || is_numeric($sub_name)) saveAndRespond($db, $session_id, $state, 'What is it called? For example: Netflix, Pilates, Gym.', null, ['Netflix', 'Spotify', 'Gym', 'Other']);
-    $state['pending_sub']['name'] = $sub_name;
-    $state['step']                = 'sub_price';
-    saveAndRespond($db, $session_id, $state, 'How much does ' . $sub_name . ' cost per session or per month?', null, ['£5', '£10', '£20', '£50', 'Other']);
+// ── STEP 1: PHP parses all numbers ─────────────────────────
+$num      = parseNumber($message);        // primary number
+$interest = parseInterestRate($message);  // e.g. 6.5%
+$term     = parseLoanTerm($message);      // e.g. 3 years = 36 months
+
+// ── STEP 2: Intent classification (LLM, no math) ───────────
+$ix                    = extractIntent($message, $state, $history);
+$intents               = $ix['intent'] ?? [];
+$is_correction         = $ix['is_correction'] ?? false;
+$correction_field      = $ix['correction_field'] ?? null;
+$goal_name_hint        = $ix['goal_name'] ?? null;
+$goal_type_hint        = $ix['goal_type'] ?? null;
+$income_change         = $ix['income_change_mentioned'] ?? false;
+$expense_change        = $ix['expense_change_mentioned'] ?? false;
+$loan_mentioned        = $ix['loan_mentioned'] ?? false;
+$sub_mentioned         = $ix['subscription_mentioned'] ?? false;
+$refs_alt              = $ix['references_alternative'] ?? false;
+$refs_prev_goal        = $ix['references_previous_goal'] ?? false;
+$is_question_only      = $ix['is_question_only'] ?? false;
+$is_emotional          = $ix['is_emotional'] ?? false;
+$is_unrelated          = $ix['is_unrelated'] ?? false;
+
+// ── STEP 3: CORRECTION HANDLER ─────────────────────────────
+// Only fires when user explicitly corrects a previously stated value.
+// PHP applies the correction using its own parsed number.
+if ($is_correction && in_array($state['step'], ['income','expenses','savings'])) {
+  if ($correction_field === 'income' && $num !== null && $num > 0) {
+    $state['income'] = $num;
+    $state['step']   = 'expenses';
+    respond($db,$session_id,$state,'No worries - income corrected to £'.number_format($num,2).'. What are your total monthly expenses?',null,['£500','£800','£1200','£1500','Other']);
   }
-  if ($state['step'] === 'sub_price') {
-    $p = extractNumber($message);
-    if (!$p || $p <= 0) saveAndRespond($db, $session_id, $state, 'How much does it cost?', null, ['£5', '£10', '£20', '£50', 'Other']);
-    $is_m = preg_match('/per month|monthly/i', $message);
-    $is_w = preg_match('/per week|weekly|a week|each week/i', $message);
-    $state['pending_sub']['raw_price'] = $p;
-    $state['step'] = 'sub_frequency';
-    if ($is_m) {
-      $state['pending_sub']['monthly_cost'] = $p;
-      $state['step'] = 'sub_duration';
-      saveAndRespond($db, $session_id, $state, 'Got it - £' . number_format($p, 2) . '/month. Ongoing or fixed period?', null, ['Ongoing', '1 month', '3 months', '6 months', 'Other']);
-    } elseif ($is_w) {
-      saveAndRespond($db, $session_id, $state, 'Got it - £' . number_format($p, 2) . '/session. Every week or does it vary?', null, ['Every week', 'About 3 times a month', 'About 2 times a month', 'It varies', 'Other']);
-    } else {
-      saveAndRespond($db, $session_id, $state, 'Is that per session, per week, or per month?', null, ['Per session', 'Per week', 'Per month', 'Other']);
-    }
+  if ($correction_field === 'expenses' && $num !== null && $num >= 0) {
+    $state['expenses'] = $num;
+    $state['step']     = 'savings';
+    $surplus = $state['income'] - $num;
+    respond($db,$session_id,$state,'No worries - expenses corrected to £'.number_format($num,2).'. Surplus: £'.number_format($surplus,2).'. How much do you currently have saved?',null,['£0','£500','£1000','Other']);
   }
-  if ($state['step'] === 'sub_frequency') {
-    $raw = $state['pending_sub']['raw_price'] ?? 0;
-    $mc  = 0;
-    if (preg_match('/per month|monthly/i', $message))                    $mc = $raw;
-    elseif (preg_match('/per week|weekly|every week|all 4/i', $message)) $mc = round($raw * 4.33, 2);
-    elseif (preg_match('/3 time|3 week|three|about 3/i', $message))      $mc = round($raw * 3, 2);
-    elseif (preg_match('/2 time|2 week|twice|two|about 2/i', $message))  $mc = round($raw * 2, 2);
-    elseif (preg_match('/once|1 time|1 week|one/i', $message))           $mc = $raw;
-    elseif (preg_match('/varies|vary|sometimes/i', $message))             $mc = round($raw * 3, 2);
-    elseif ($price && $price > 0)                                         $mc = round($raw * $price, 2);
-    else saveAndRespond($db, $session_id, $state, 'How often per month?', null, ['Every week', 'About 3 times', 'About 2 times', 'It varies', 'Other']);
-    if ($mc > 0) {
-      $state['pending_sub']['monthly_cost'] = $mc;
-      $state['step'] = 'sub_duration';
-      saveAndRespond($db, $session_id, $state, 'That works out to £' . number_format($mc, 2) . '/month. Ongoing or fixed period?', null, ['Ongoing', '1 month', '3 months', '6 months', 'Other']);
-    }
+  if ($correction_field === 'savings' && $num !== null && $num >= 0) {
+    $state['savings'] = $num;
+    $state['step']    = 'active';
+    respond($db,$session_id,$state,'No worries - savings corrected to £'.number_format($num,2).'. What would you like to check?',null,['A laptop £800','A phone £600','A car £10k','Other']);
   }
-  if ($state['step'] === 'sub_duration') {
-    $mc      = $state['pending_sub']['monthly_cost'] ?? 0;
-    $sname   = $state['pending_sub']['name'] ?? 'subscription';
-    $months  = extractNumber($message);
-    $ongoing = preg_match('/ongoing|long.?term|permanent|forever|no end|open/i', $message);
-    if ($ongoing) {
-      [$bot_reply, $calculation] = runCalculation($db, $session_id, $user_id, $state, $sname, $mc, 'recurring', $history);
-      saveAndRespond($db, $session_id, $state, $bot_reply, $calculation, ['Check another item', 'Run a stress test', 'Reset budget']);
-    } elseif ($months && $months > 0) {
-      $total = round($mc * $months, 2);
-      [$bot_reply, $calculation] = runCalculation($db, $session_id, $user_id, $state, $sname . ' (' . $months . ' months)', $total, 'one-time', $history);
-      saveAndRespond($db, $session_id, $state, $bot_reply, $calculation, ['Check another item', 'Run a stress test', 'Reset budget']);
-    } else {
-      saveAndRespond($db, $session_id, $state, 'Ongoing or fixed period?', null, ['Ongoing', '1 month', '3 months', '6 months', 'Other']);
-    }
-  }
+  // No field identified - back up one step
+  $step_map = ['expenses'=>'income','savings'=>'expenses'];
+  $prev = isset($step_map[$state['step']]) ? $step_map[$state['step']] : $state['step'];
+  $state['step'] = $prev;
+  $bot_map = ['income'=>'No problem - what is your monthly income after tax?','expenses'=>'No problem - what are your total monthly expenses?'];
+  $bot = isset($bot_map[$prev]) ? $bot_map[$prev] : 'No problem - what would you like to correct?';
+  respond($db,$session_id,$state,$bot,null,['Other']);
 }
 
-// STEP 1: Extract structured facts from every message
-$facts = extractFacts($message, $state, $history);
-$updated_fields = applyFacts($facts, $state);
+// ═══════════════════════════════════════════════════════════
+// STRUCTURED COLLECTION STEPS (PHP controlled, not LLM)
+// ═══════════════════════════════════════════════════════════
 
-// Update step based on what was just collected
-if (in_array('income', $updated_fields) && empty($state['expenses'])) {
-  $state['step'] = 'expenses';
-  $state['expected_next'] = 'expenses';
-}
-if (in_array('expenses', $updated_fields) && !isset($state['savings'])) {
-  $state['step'] = 'savings';
-  $state['expected_next'] = 'savings';
-}
-if (in_array('savings', $updated_fields)) {
-  $state['expected_next'] = null;
-  if (!empty($state['pending_goal']) && empty($state['pending_item'])) {
-    $state['pending_item']  = $state['pending_goal'];
-    $state['expected_next'] = 'item_price';
+// GREETING — read first message, extract item, start income collection
+if ($state['step'] === 'greeting') {
+  $state['step'] = 'income';
+
+  // Extract item from first message
+  $item_name = $goal_name_hint ?? parseItemName($message);
+  // Clean any price bleed from item name
+  if ($item_name) {
+    $item_name = preg_replace('/\b(costing|worth|at|for|priced?|costs?|approximately|around|roughly)\b\s*£?[\d,.km]*/i', '', $item_name);
+    $item_name = trim(preg_replace('/\s+/', ' ', $item_name));
   }
-  if (!empty($state['pending_item']) && !empty($state['pending_price'])) {
-    $state['step'] = 'item';
+  // Only use parsed number as cost if it is large enough to be a purchase (> £50)
+  $item_cost = ($num && $num > 50) ? $num : null;
+  $item_type = $goal_type_hint ?? (preg_match('/per month|monthly|subscription|recurring/i', $message) ? 'recurring' : 'one-time');
+
+  if ($item_name && strlen(trim($item_name)) > 1) {
+    $state['active_goal'] = ['name' => trim($item_name), 'cost' => $item_cost, 'type' => $item_type];
+    $cost_str  = $item_cost ? ' at £'.number_format($item_cost,2) : '';
+    $bot_reply = "Great - {$item_name}{$cost_str} is a solid goal. To check if that is achievable I need a few numbers first. What is your monthly income after tax?";
   } else {
-    $state['step'] = !empty($state['pending_item']) ? 'item' : 'item';
+    $bot_reply = "Hello! I am SmartSpend, your personal money coach. I can help you work out if you can afford something, plan your savings, and give you honest budget guidance.\n\nTo get started - what is your monthly income after tax?";
+  }
+  respond($db,$session_id,$state,$bot_reply,null,['£1500','£2000','£2500','£3000','Other']);
+}
+
+// INCOME STEP
+if ($state['step'] === 'income') {
+  if ($num && $num > 0) {
+    $state['income'] = $num;
+    $state['step']   = 'expenses';
+    respond($db,$session_id,$state,'Got it - monthly income of £'.number_format($num,2).'. Now, what are your total monthly expenses? Include rent, food, bills, transport and subscriptions.',null,['£500','£800','£1200','£1500','Other']);
+  }
+  respond($db,$session_id,$state,generateReply($message,$state,$history),null,['£1500','£2000','£2500','£3000','Other']);
+}
+
+// EXPENSES STEP
+if ($state['step'] === 'expenses') {
+  if ($num !== null && $num >= 0) {
+    $state['expenses'] = $num;
+    $state['step']     = 'savings';
+    $surplus = $state['income'] - $num;
+    $reply   = $num >= $state['income']
+      ? 'Expenses of £'.number_format($num,2).' equal or exceed income - no monthly surplus. How much do you currently have saved?'
+      : 'Expenses of £'.number_format($num,2).' - that leaves a surplus of £'.number_format($surplus,2).' per month. How much do you currently have saved?';
+    respond($db,$session_id,$state,$reply,null,['£0','£500','£1000','£2000','Other']);
+  }
+  respond($db,$session_id,$state,generateReply($message,$state,$history),null,['£500','£800','£1200','£1500','Other']);
+}
+
+// SAVINGS STEP
+if ($state['step'] === 'savings') {
+  if ($num !== null && $num >= 0) {
+    $state['savings'] = $num;
+    $state['step']    = 'active';
+    $ef_note = '';
+    $rec = $state['expenses'] * 3;
+    if ($num < $rec && !$state['emergency_fund_warned']) {
+      $ef_note = "\n\nYour savings of £".number_format($num,2)." are below the recommended 3-month emergency fund of £".number_format($rec,2).". Worth building this up before large purchases.";
+      $state['emergency_fund_warned'] = true;
+    }
+    // Auto-calculate if active goal already has cost
+    if (canCalculate($state)) {
+      $ag     = $state['active_goal'];
+      $result = runCalc($db,$session_id,$user_id,$state,$ag['name'],floatval($ag['cost']),$ag['type']??'one-time',$history);
+      $bot    = 'Savings of £'.number_format($num,2).' noted.'.$ef_note."\n\n".$result['label'].' - here is your result for '.$result['name'].".\n\n".$result['ai_text'];
+      respond($db,$session_id,$state,$bot,$result['calculation'],['Check another item','Compare with something else','Run a stress test','Reset budget']);
+    }
+    $bot = 'Savings of £'.number_format($num,2).' noted.'.$ef_note."\n\nWhat would you like to buy or check? Tell me the item and the price.";
+    respond($db,$session_id,$state,$bot,null,['A laptop £800','A phone £600','A car £10k','A subscription','Other']);
+  }
+  respond($db,$session_id,$state,generateReply($message,$state,$history),null,['£0','£500','£1000','Other']);
+}
+
+// ═══════════════════════════════════════════════════════════
+// ACTIVE PHASE — all budget data collected
+// PHP runs every financial operation.
+// LLM only generates conversation at the end.
+// ═══════════════════════════════════════════════════════════
+
+$system_results = [];
+$calculation    = null;
+$quick_replies  = ['Check another item','Run a stress test','Reset budget','Other'];
+$action_taken   = false; // prevents multiple conflicting actions
+
+// ── INCOME UPDATE (promotion/raise) ────────────────────────
+// Only fires when user explicitly mentions a raise or income change
+if ($income_change && $num && $num > 0 && !$action_taken) {
+  // Percentage increase?
+  if (preg_match('/(\d+(?:\.\d+)?)\s*%/i', $message, $pct) && !empty($state['income'])) {
+    $new_income = round($state['income'] * (1 + floatval($pct[1]) / 100), 2);
+  } else {
+    $new_income = $num;
+  }
+  $state['income']                   = $new_income;
+  $new_surplus                       = $new_income - ($state['expenses'] ?? 0);
+  $system_results['income_updated']  = '£'.number_format($new_income,2).'/month';
+  $system_results['new_surplus']     = '£'.number_format($new_surplus,2).'/month';
+
+  // Recalculate active goal timeline with new surplus
+  if (!empty($state['active_goal']['cost'])) {
+    $ag        = $state['active_goal'];
+    $remaining = max(0, $ag['cost'] - ($state['savings'] ?? 0));
+    $months    = $new_surplus > 0 ? (int) ceil($remaining / $new_surplus) : 0;
+    $y  = (int)floor($months/12); $mo = $months%12;
+    $t  = $months===0 ? 'already there' : ($y>0 ? $y.' year'.($y>1?'s':'').($mo>0?' and '.$mo.' months':'') : $months.' months');
+    $system_results['updated_goal_timeline'] = 'With new income of £'.number_format($new_income,2).'/month and surplus of £'.number_format($new_surplus,2).'/month, saving for '.$ag['name'].' (£'.number_format($ag['cost'],2).') now takes approximately '.$t;
   }
 }
 
-// STEP 2: Auto-calculate if we now have everything
-if (!empty($state['income']) && !empty($state['expenses']) && isset($state['savings'])
-  && !empty($state['pending_item']) && !empty($state['pending_price'])) {
-  $item_name = $state['pending_item'];
-  $item_price = floatval($state['pending_price']);
-  $item_type  = $state['pending_type'] ?? (isRecurring($message) ? 'recurring' : 'one-time');
-  [$bot_reply, $calculation] = runCalculation($db, $session_id, $user_id, $state, $item_name, $item_price, $item_type, $history);
-  saveAndRespond($db, $session_id, $state, $bot_reply, $calculation, ['Check another item', 'Compare with something else', 'Run a stress test', 'Reset budget']);
+// ── EXTRA SAVING RATE ──────────────────────────────────────
+// Detect "I can save an extra X per month" BEFORE expense/affordability checks
+// This prevents £200 being treated as an item cost or expense reduction
+$is_extra_saving = preg_match('/save.{0,15}extra|extra.{0,15}save|save.{0,10}more|put.{0,10}more.{0,10}aside|save.{0,10}additional|additional.{0,10}saving/i', $message)
+  && $num && $num > 0
+  && !empty($state['active_goal']['cost'])
+  && $num < ($state['active_goal']['cost'] ?? PHP_INT_MAX)
+  && !$loan_mentioned;
+
+if ($is_extra_saving && !$action_taken) {
+  $current_surplus = ($state['income'] ?? 0) - ($state['expenses'] ?? 0);
+  $new_saving_rate = $current_surplus + $num;
+  $state['active_goal']['monthly_saving'] = $new_saving_rate;
+  $ag        = $state['active_goal'];
+  $target    = $refs_alt && !empty($ag['alternative_cost']) ? $ag['alternative_cost'] : ($ag['cost'] ?? 0);
+  $remaining = max(0, $target - ($state['savings'] ?? 0));
+  $months    = $new_saving_rate > 0 ? (int) ceil($remaining / $new_saving_rate) : 0;
+  $y  = (int)floor($months/12); $mo = $months%12;
+  $t  = $months===0 ? 'already there' : ($y>0 ? $y.' year'.($y>1?'s':'').($mo>0?' and '.$mo.' months':'') : $months.' months');
+  $system_results['saving_timeline'] = 'With your current surplus of £'.number_format($current_surplus,2).'/month plus £'.number_format($num,2).'/month extra, saving £'.number_format($new_saving_rate,2).'/month toward '.($ag['name']??'goal').' (£'.number_format($target,2).'): approximately '.$t;
+  $action_taken = true;
 }
 
-// Refresh budget_complete after fact extraction
-$budget_complete = !empty($state['income']) && !empty($state['expenses']) && isset($state['savings']);
+// ── EXPENSE CHANGE ─────────────────────────────────────────
+// Only fires when user explicitly says they will reduce/change expenses
+// Guards: must be expense_change_mentioned, must have income, must be < income, must not be loan
+if ($expense_change && !$is_extra_saving && $num !== null && $num >= 0 && $num < ($state['income'] ?? PHP_INT_MAX) && !$loan_mentioned && !$action_taken) {
+  $state['expenses']                    = $num;
+  $new_surplus                          = $state['income'] - $num;
+  $system_results['expenses_updated']   = '£'.number_format($num,2).'/month';
+  $system_results['new_surplus']        = '£'.number_format($new_surplus,2).'/month';
 
-// STEP 3: Classify and route remaining logic
-$intent = classifyMessage($message, $state, $history);
+  // Recalculate active goal timeline
+  if (!empty($state['active_goal']['cost'])) {
+    $ag        = $state['active_goal'];
+    $remaining = max(0, $ag['cost'] - ($state['savings'] ?? 0));
+    $months    = $new_surplus > 0 ? (int) ceil($remaining / $new_surplus) : 0;
+    $y  = (int)floor($months/12); $mo = $months%12;
+    $t  = $months===0 ? 'already there' : ($y>0 ? $y.' year'.($y>1?'s':'').($mo>0?' and '.$mo.' months':'') : $months.' months');
+    $system_results['updated_goal_timeline'] = 'With reduced expenses of £'.number_format($num,2).'/month and surplus of £'.number_format($new_surplus,2).'/month, saving for '.$ag['name'].' (£'.number_format($ag['cost'],2).') now takes approximately '.$t;
+  }
+  $action_taken = true;
+}
 
-// Hard correction
-if ($intent === 'correction' || preg_match('/^(no[\s,.!]|no$|sorry|actually|i meant|wait|i already|my income is|my salary is|my expenses are|my savings are)/i', $message)) {
-  if ($facts['is_correction'] ?? false) {
-    $field = $facts['correcting_field'] ?? null;
-    if ($field === 'income' && !empty($facts['income'])) {
-      $state['income'] = $facts['income']; $state['step'] = 'expenses'; $state['expected_next'] = 'expenses';
-      saveAndRespond($db, $session_id, $state, 'No worries - income corrected to £' . number_format($facts['income'], 2) . '. What are your monthly expenses?', null, ['£500', '£800', '£1200', '£1500', 'Other']);
+// ── SUBSCRIPTION ────────────────────────────────────────────
+// Only fires when subscription is explicitly mentioned with a cost
+if ($sub_mentioned && $num && $num > 0 && !$action_taken) {
+  $monthly_cost = preg_match('/per week|weekly/i', $message) ? round($num * 4.33, 2) : $num;
+  $state['expenses'] = ($state['expenses'] ?? 0) + $monthly_cost;
+  $new_surplus       = $state['income'] - $state['expenses'];
+  $system_results['subscription_added'] = '£'.number_format($monthly_cost,2).'/month added';
+  $system_results['new_expenses']       = '£'.number_format($state['expenses'],2).'/month';
+  $system_results['new_surplus']        = '£'.number_format($new_surplus,2).'/month';
+}
+
+// ── LOAN ENGINE ─────────────────────────────────────────────
+// PHP owns loan calculation entirely. LLM never computes a loan figure.
+// State is locked once calculated - only explicit correction_field updates it.
+if ($loan_mentioned && !$action_taken) {
+  if (!isset($state['loan'])) $state['loan'] = [];
+
+  // Update loan fields only from explicit user input this message
+  // Correction takes priority (handled above in corrections block for active phase)
+  // If user gives a new amount AND new interest/term in same message - treat as new loan scenario
+  $new_loan_scenario = ($num && $num >= 500) && ($interest !== null || $term !== null);
+
+  if ($correction_field === 'loan_amount' && $num !== null) {
+    $state['loan']['amount'] = $num;
+  } elseif ($num && $num >= 500 && ($new_loan_scenario || empty($state['loan']['amount']))) {
+    $state['loan']['amount'] = $num;
+  }
+
+  if ($correction_field === 'loan_interest' && $interest !== null) {
+    $state['loan']['interest'] = $interest;
+  } elseif ($interest !== null) {
+    $state['loan']['interest'] = $interest; // always overwrite interest when explicitly given
+  }
+
+  if ($correction_field === 'loan_months' && $term !== null) {
+    $state['loan']['months'] = $term;
+  } elseif ($term !== null) {
+    $state['loan']['months'] = $term; // always overwrite term when explicitly given
+  }
+
+  // If all three new values given this message, treat as completely fresh loan
+  if ($num && $num >= 500 && $interest !== null && $term !== null) {
+    $state['loan'] = ['amount' => $num, 'interest' => $interest, 'months' => $term];
+  }
+
+  // Run calculation only when all three values are present
+  if (!empty($state['loan']['amount']) && isset($state['loan']['interest']) && !empty($state['loan']['months'])) {
+    $lc = calculateLoan(floatval($state['loan']['amount']), floatval($state['loan']['interest']), intval($state['loan']['months']));
+    // Always recalculate when fields change - result is deterministic
+    $state['loan']['monthly_payment'] = $lc['monthly_payment'];
+    $state['loan']['total_repayment'] = $lc['total_repayment'];
+    $state['loan']['total_interest']  = $lc['total_interest'];
+
+    $surplus    = ($state['income'] ?? 0) - ($state['expenses'] ?? 0);
+    $affordable = $lc['monthly_payment'] <= $surplus;
+    $state['loan']['affordable'] = $affordable
+      ? 'Affordable - within your £'.number_format($surplus,2).' monthly surplus'
+      : 'Not affordable - exceeds surplus by £'.number_format($lc['monthly_payment']-$surplus,2);
+
+    $system_results['loan_monthly_payment'] = '£'.number_format($lc['monthly_payment'],2);
+    $system_results['loan_total_repayment'] = '£'.number_format($lc['total_repayment'],2);
+    $system_results['loan_total_interest']  = '£'.number_format($lc['total_interest'],2);
+    $system_results['loan_affordability']   = $state['loan']['affordable'];
+  }
+}
+
+// ── CUSTOM SAVING RATE ──────────────────────────────────────
+// User states how much they can save per month - PHP calculates timeline
+// Skip if extra_saving already handled this message
+if ((in_array('custom_savings_calc',$intents) || in_array('saving_time',$intents)) && !$action_taken && !$is_extra_saving) {
+  $ag = $state['active_goal'] ?? null;
+  if ($ag) {
+    // Determine saving rate: prefer explicit amount from this message, fall back to stored rate
+    $rate = null;
+    if ($num && $num > 0 && $num < ($state['income'] ?? PHP_INT_MAX) && !$loan_mentioned && !$expense_change) {
+      $rate = $num;
+      $state['active_goal']['monthly_saving'] = $rate;
+    } elseif (!empty($ag['monthly_saving'])) {
+      $rate = $ag['monthly_saving'];
     }
-    if ($field === 'expenses' && !empty($facts['expenses'])) {
-      $state['expenses'] = $facts['expenses']; $state['step'] = 'savings'; $state['expected_next'] = 'savings';
-      saveAndRespond($db, $session_id, $state, 'No worries - expenses corrected to £' . number_format($facts['expenses'], 2) . '. How much do you have saved?', null, ['£0', '£500', '£1000', 'Other']);
-    }
-    if ($field === 'savings' && isset($facts['savings'])) {
-      $state['savings'] = $facts['savings']; $state['step'] = 'item';
-      saveAndRespond($db, $session_id, $state, 'No worries - savings corrected to £' . number_format($facts['savings'], 2) . '. What would you like to check?', null, ['A laptop £800', 'A phone £600', 'A car £10k', 'Other']);
+
+    // Target: alternative if referenced, otherwise main goal cost
+    $target       = $refs_alt && !empty($ag['alternative_cost']) ? $ag['alternative_cost'] : ($ag['cost'] ?? null);
+    $target_label = $refs_alt && !empty($ag['alternative_cost']) ? ($ag['name']??'item').' (cheaper option)' : ($ag['name']??'item');
+
+    if ($rate && $target) {
+      $remaining = max(0, $target - ($state['savings'] ?? 0));
+      $months    = $rate > 0 ? (int) ceil($remaining / $rate) : 0;
+      $y  = (int)floor($months/12); $mo = $months%12;
+      $t  = $months===0 ? 'already there' : ($y>0 ? $y.' year'.($y>1?'s':'').($mo>0?' and '.$mo.' months':'') : $months.' months');
+      $system_results['saving_timeline'] = 'Saving £'.number_format($rate,2).'/month toward '.$target_label.' (£'.number_format($target,2).'): approximately '.$t;
     }
   }
-  // Fallback correction
-  if ($price !== null && $price >= 0) {
-    if (preg_match('/income|salary|wage|earn/i', $message)) {
-      $state['income'] = $price; $state['step'] = 'expenses'; $state['expected_next'] = 'expenses';
-      saveAndRespond($db, $session_id, $state, 'No worries - income corrected to £' . number_format($price, 2) . '. What are your monthly expenses?', null, ['£500', '£800', '£1200', '£1500', 'Other']);
-    } elseif (preg_match('/expenses|bills|rent|spend/i', $message)) {
-      $state['expenses'] = $price; $state['step'] = 'savings'; $state['expected_next'] = 'savings';
-      saveAndRespond($db, $session_id, $state, 'No worries - expenses corrected to £' . number_format($price, 2) . '. How much do you have saved?', null, ['£0', '£500', '£1000', 'Other']);
-    } elseif (preg_match('/savings|saved|have saved/i', $message)) {
-      $state['savings'] = $price; $state['step'] = 'item';
-      saveAndRespond($db, $session_id, $state, 'No worries - savings corrected to £' . number_format($price, 2) . '. What would you like to check?', null, ['A laptop £800', 'A phone £600', 'Other']);
-    } elseif (!empty($state['pending_item'])) {
-      $item_type = $state['pending_type'] ?? 'one-time';
-      [$bot_reply, $calculation] = runCalculation($db, $session_id, $user_id, $state, $state['pending_item'], $price, $item_type, $history);
-      saveAndRespond($db, $session_id, $state, $bot_reply, $calculation, ['Check another item', 'Compare', 'Run a stress test', 'Reset budget']);
+}
+
+// ── STRESS TEST ─────────────────────────────────────────────
+if (in_array('stress_test',$intents) && !empty($state['income']) && !empty($state['expenses']) && !$action_taken) {
+  $pct        = null;
+  $total_loss = (bool)preg_match('/total|100|all|no income|zero/i', $message);
+  if (preg_match('/(\d+)\s*%/i', $message, $m)) $pct = intval($m[1]);
+
+  if ($total_loss || $pct) {
+    $new_inc  = $total_loss ? 0 : round($state['income'] * (1 - ($pct/100)), 2);
+    $new_sur  = $new_inc - $state['expenses'];
+    $runway   = (!empty($state['savings']) && $state['expenses'] > 0) ? round($state['savings']/$state['expenses'],1) : 0;
+    $drop     = $total_loss ? 'total loss of income' : $pct.'% drop';
+    $system_results['stress_test'] = $new_sur >= 0
+      ? "With {$drop}: income = £".number_format($new_inc,2).", surplus = £".number_format($new_sur,2)."/month"
+      : "With {$drop}: income = £".number_format($new_inc,2).", shortfall = £".number_format(abs($new_sur),2)."/month. Savings last approx {$runway} months";
+  }
+}
+
+// ── AFFORDABILITY CHECK ─────────────────────────────────────
+// Runs when a new item with a cost is introduced OR affordability_check intent fires
+// Strict guards prevent this from running on expense updates, loan discussions, etc.
+if (!empty($state['income']) && !empty($state['expenses']) && isset($state['savings']) && !$action_taken) {
+
+  $new_name = null;
+  $new_cost = null;
+  $new_type = 'one-time';
+
+  // New goal introduced this message
+  if ($goal_name_hint && $num && $num > 50 && !$loan_mentioned && !$expense_change && !$sub_mentioned && !$is_extra_saving) {
+    $new_name = $goal_name_hint;
+    $new_cost = $num;
+    $new_type = $goal_type_hint ?? 'one-time';
+  }
+  // Affordability check on existing or newly mentioned item
+  elseif (in_array('affordability_check',$intents) && !$refs_prev_goal && !$loan_mentioned && !$expense_change && !$is_extra_saving && $num && $num > 50) {
+    $new_name = $goal_name_hint ?? ($state['active_goal']['name'] ?? null);
+    $new_cost = $num;
+    $new_type = $goal_type_hint ?? 'one-time';
+  }
+
+  if ($new_name && $new_cost) {
+    // Lock the new goal into state
+    $state['active_goal'] = ['name'=>$new_name,'cost'=>$new_cost,'type'=>$new_type];
+
+    // Only run calculation if not already calculated for this exact item+cost
+    $already_done = false;
+    foreach ($state['checks'] as $c) {
+      if (strtolower($c['item_name'])===strtolower($new_name) && abs($c['item_price']-$new_cost)<1) {
+        $already_done = true; break;
+      }
+    }
+
+    if (!$already_done) {
+      $result      = runCalc($db,$session_id,$user_id,$state,$new_name,$new_cost,$new_type,$history);
+      $calculation = $result['calculation'];
+      $system_results['affordability'] = $result['label'].' for '.$new_name;
+      $quick_replies = ['Check another item','Compare with something else','Run a stress test','Reset budget'];
     }
   }
-  // No number correction - back up one step
-  $prev = match($state['step']) {
-    'expenses' => 'income', 'savings' => 'expenses', 'item' => 'savings', default => $state['step'],
+}
+
+// ── COMPARISON ──────────────────────────────────────────────
+if (in_array('comparison',$intents) && count($state['checks']) >= 2 && !$action_taken) {
+  $last = $state['checks'][count($state['checks'])-1];
+  $prev = $state['checks'][count($state['checks'])-2];
+  $fmt = function(int $m): string {
+    if ($m === 0) return 'already affordable';
+    $y = (int)floor($m/12); $mo = $m%12;
+    return $y > 0 ? $y.'yr '.($mo > 0 ? $mo.'mo' : '') : $m.'mo';
   };
-  $state['step'] = $prev; $state['expected_next'] = $prev;
-  $bot_reply = match($prev) {
-    'income'   => "No problem - what is your monthly income after tax?",
-    'expenses' => "No problem - what are your total monthly expenses?",
-    'savings'  => "No problem - how much do you currently have saved?",
-    default    => "No problem - what would you like to correct?",
-  };
-  saveAndRespond($db, $session_id, $state, $bot_reply, null, ['Other']);
+  $system_results['comparison'] =
+    $prev['item_name'].' £'.number_format($prev['item_price'],2).': '.$prev['risk_level'].' risk, '.$fmt($prev['calc']['months_to_save']).' to save | '.
+    $last['item_name'].' £'.number_format($last['item_price'],2).': '.$last['risk_level'].' risk, '.$fmt($last['calc']['months_to_save']).' to save';
 }
 
-// Multi-item
-if ($intent === 'multi_item' || hasMultipleItems($message)) {
-  $items = extractItemsFromMessage($message, $state, $history);
-  if (count($items) >= 2) {
-    $all_priced = array_reduce($items, fn($c, $i) => $c && !empty($i['price']), true);
-    if ($all_priced && $budget_complete) {
-      $bot_reply = generateMultiItemResponse($items, $state, $history, $message);
-      usort($items, fn($a, $b) => $a['price'] <=> $b['price']);
-      $cheapest = $items[0];
-      [$calc_reply, $calculation] = runCalculation($db, $session_id, $user_id, $state, $cheapest['name'], $cheapest['price'], $cheapest['type'] ?? 'one-time', $history);
-      saveAndRespond($db, $session_id, $state, $bot_reply, $calculation, ['Check another item', 'Compare', 'Run a stress test', 'Reset budget']);
-    }
+// ── GENERATE CONVERSATION REPLY ─────────────────────────────
+// LLM receives full verified state + all system results.
+// LLM outputs natural language only. No math. No numbers it was not given.
+$bot_reply = generateReply($message, $state, $history, $system_results);
+
+// If a full calculation happened, prepend the standard label line
+if (!empty($system_results['affordability'])) {
+  $r      = $calculation;
+  $label  = $r['risk_level']==='green' ? 'Good news' : ($r['risk_level']==='yellow' ? 'Heads up' : 'Warning');
+  $ai_ctx = "Income: £{$state['income']}. Expenses: £{$state['expenses']}. Savings: £{$state['savings']}. Item: {$r['item_name']} at £".number_format($r['item_price'],2)." ({$r['item_type']}). Surplus: £{$r['surplus']}. Risk: {$r['risk_level']}. Months: {$r['months_to_save']}.";
+  $bot_reply = $label.' - here is your result for '.$r['item_name'].".\n\n".getAIExplanation($ai_ctx,$r['risk_level']);
+}
+
+// Append loan result if calculated this message and not already in reply
+// Only append loan line when loan was freshly calculated this message (loan_mentioned AND new calc ran)
+if (!empty($system_results['loan_monthly_payment']) && $loan_mentioned) {
+  $mp = $system_results['loan_monthly_payment'];
+  if (strpos($bot_reply, $mp) === false) {
+    $bot_reply .= "\n\nLoan repayment: {$mp}/month | Total: {$system_results['loan_total_repayment']} | Interest: {$system_results['loan_total_interest']}. {$system_results['loan_affordability']}.";
   }
 }
 
-// expected_next priority
-if ($state['expected_next'] && $price !== null) {
-  switch ($state['expected_next']) {
-    case 'item_price':
-      $item_name = $state['pending_item'] ?? $state['pending_goal'] ?? 'item';
-      $item_type = $state['pending_type'] ?? (isRecurring($message) ? 'recurring' : 'one-time');
-      $state['expected_next'] = null;
-      [$bot_reply, $calculation] = runCalculation($db, $session_id, $user_id, $state, $item_name, $price, $item_type, $history);
-      saveAndRespond($db, $session_id, $state, $bot_reply, $calculation, ['Check another item', 'Compare', 'Run a stress test', 'Reset budget']);
-    case 'income':
-      if ($price > 0) {
-        $state['income'] = $price; $state['step'] = 'expenses'; $state['expected_next'] = 'expenses';
-        saveAndRespond($db, $session_id, $state, 'Got it - income of £' . number_format($price, 2) . '. What are your total monthly expenses?', null, ['£500', '£800', '£1200', '£1500', 'Other']);
-      }
-      break;
-    case 'expenses':
-      if ($price >= 0) {
-        $state['expenses'] = $price; $state['step'] = 'savings'; $state['expected_next'] = 'savings';
-        $surplus = ($state['income'] ?? 0) - $price;
-        $msg_r   = $price >= ($state['income'] ?? 0)
-          ? 'Expenses of £' . number_format($price, 2) . ' - no surplus. How much do you have saved?'
-          : 'Expenses of £' . number_format($price, 2) . ' - surplus of £' . number_format($surplus, 2) . '/month. How much do you have saved?';
-        saveAndRespond($db, $session_id, $state, $msg_r, null, ['£0', '£500', '£1000', '£2000', 'Other']);
-      }
-      break;
-    case 'savings':
-      if ($price >= 0) {
-        $state['savings'] = $price; $state['expected_next'] = null;
-        $ef_note = '';
-        $ef      = emergencyFundWarning($price, $state['expenses'] ?? 0);
-        if ($ef) $ef_note = "\n\n" . $ef;
-        $state['emergency_fund_warned'] = (bool) $ef;
-        if (!empty($state['pending_item']) && !empty($state['pending_price'])) {
-          $item_type = $state['pending_type'] ?? 'one-time';
-          [$bot_reply, $calculation] = runCalculation($db, $session_id, $user_id, $state, $state['pending_item'], floatval($state['pending_price']), $item_type, $history);
-          if ($ef_note) $bot_reply = trim($ef_note) . "\n\n" . $bot_reply;
-          saveAndRespond($db, $session_id, $state, $bot_reply, $calculation, ['Check another item', 'Compare', 'Run a stress test', 'Reset budget']);
-        } elseif (!empty($state['pending_goal'])) {
-          $state['step'] = 'item'; $state['pending_item'] = $state['pending_goal']; $state['expected_next'] = 'item_price';
-          saveAndRespond($db, $session_id, $state, 'Savings of £' . number_format($price, 2) . ' noted.' . $ef_note . "\n\nNow - how much does the " . $state['pending_goal'] . " cost?", null, ['£500', '£1000', '£5000', '£10000', 'Other']);
-        } else {
-          $state['step'] = 'item';
-          saveAndRespond($db, $session_id, $state, 'Savings of £' . number_format($price, 2) . ' noted.' . $ef_note . "\n\nWhat would you like to buy or check?", null, ['A laptop £800', 'A phone £600', 'A car £10k', 'A subscription', 'Other']);
-        }
-      }
-      break;
-    case 'stress_pct':
-      $total_loss = (bool) preg_match('/total|100|all|no income|zero/i', $message);
-      $pct        = $total_loss ? 100 : $price;
-      $new_income = $total_loss ? 0 : (($state['income'] ?? 0) * (1 - ($pct / 100)));
-      $new_surplus   = $new_income - ($state['expenses'] ?? 0);
-      $months_runway = ($state['savings'] > 0 && ($state['expenses'] ?? 0) > 0) ? round($state['savings'] / $state['expenses'], 1) : 0;
-      $drop_label    = $total_loss ? 'a total loss of income' : 'a ' . $pct . '% drop in income';
-      if ($new_surplus > 0) {
-        $bot_reply = 'Stress test - with ' . $drop_label . ', income drops to £' . number_format($new_income, 2) . ' and surplus reduces to £' . number_format($new_surplus, 2) . '.';
-      } elseif ($new_surplus == 0) {
-        $bot_reply = 'Stress test - with ' . $drop_label . ', income exactly covers expenses. Savings of £' . number_format($state['savings'], 2) . ' provide a buffer.';
-      } else {
-        $bot_reply = 'Stress test - with ' . $drop_label . ', income drops to £' . number_format($new_income, 2) . ' giving a shortfall of £' . number_format(abs($new_surplus), 2) . '/month. Savings last ' . $months_runway . ' months.';
-      }
-      $state['step'] = 'followup'; $state['expected_next'] = null;
-      saveAndRespond($db, $session_id, $state, $bot_reply, null, ['Check another item', 'Reset budget', 'Run another stress test', 'Other']);
-  }
+// Append saving timeline if not already in reply
+if (!empty($system_results['saving_timeline']) && !preg_match('/\d+ month|\d+ year|already there/i', $bot_reply)) {
+  $bot_reply .= "\n\n".$system_results['saving_timeline'].'.';
 }
 
-// pending_item with price - always wins
-if ($state['pending_item'] && $price !== null && $price > 0 && !preg_match('/\b(what|how|when|why|who|tell|help|can you|should|would|do you)\b/i', $message)) {
-  $item_type = $state['pending_type'] ?? (isRecurring($message) ? 'recurring' : 'one-time');
-  [$bot_reply, $calculation] = runCalculation($db, $session_id, $user_id, $state, $state['pending_item'], $price, $item_type, $history);
-  saveAndRespond($db, $session_id, $state, $bot_reply, $calculation, ['Check another item', 'Compare', 'Run a stress test', 'Reset budget']);
+// Append goal timeline update if present
+if (!empty($system_results['updated_goal_timeline']) && !preg_match('/\d+ month|\d+ year|already there/i', $bot_reply)) {
+  $bot_reply .= "\n\n".$system_results['updated_goal_timeline'].'.';
 }
 
-// Income step
-if ($state['step'] === 'income' && $price && $price > 0 && !preg_match('/\b(what|how|when|why|who|tell|help)\b/i', $message)) {
-  $state['income'] = $price; $state['step'] = 'expenses'; $state['expected_next'] = 'expenses';
-  saveAndRespond($db, $session_id, $state, 'Got it - income of £' . number_format($price, 2) . '. What are your total monthly expenses?', null, ['£500', '£800', '£1200', '£1500', 'Other']);
+// Append stress test if not in reply
+if (!empty($system_results['stress_test']) && strpos(strtolower($bot_reply),'stress') === false) {
+  $bot_reply .= "\n\n".$system_results['stress_test'].'.';
 }
 
-// Expenses step
-if ($state['step'] === 'expenses' && $price !== null && $price >= 0 && !preg_match('/\b(what|how|when|why|who|tell|help)\b/i', $message)) {
-  $state['expenses'] = $price; $state['step'] = 'savings'; $state['expected_next'] = 'savings';
-  $surplus = ($state['income'] ?? 0) - $price;
-  $msg_r   = $price >= ($state['income'] ?? 0)
-    ? 'Expenses of £' . number_format($price, 2) . ' - no surplus. How much do you have saved?'
-    : 'Expenses of £' . number_format($price, 2) . ' - surplus of £' . number_format($surplus, 2) . '/month. How much do you have saved?';
-  saveAndRespond($db, $session_id, $state, $msg_r, null, ['£0', '£500', '£1000', '£2000', 'Other']);
+// ── QUICK REPLIES ───────────────────────────────────────────
+// Only show number buttons when a specific budget field is missing
+$missing = getMissingBudgetField($state);
+if (!$calculation && $missing) {
+  if ($missing==='income')    $quick_replies = ['£1500','£2000','£2500','£3000','Other'];
+  elseif ($missing==='expenses') $quick_replies = ['£500','£800','£1200','£1500','Other'];
+  elseif ($missing==='savings')  $quick_replies = ['£0','£500','£1000','£2000','Other'];
 }
 
-// Savings step
-if ($state['step'] === 'savings' && $price !== null && $price >= 0 && !preg_match('/\b(what|how|when|why|who|tell|help)\b/i', $message)) {
-  $state['savings'] = $price; $state['expected_next'] = null;
-  $ef_note = '';
-  $ef      = emergencyFundWarning($price, $state['expenses'] ?? 0);
-  if ($ef) $ef_note = "\n\n" . $ef;
-  $state['emergency_fund_warned'] = (bool) $ef;
-
-  if (!empty($state['pending_item']) && !empty($state['pending_price'])) {
-    $item_type = $state['pending_type'] ?? 'one-time';
-    [$bot_reply, $calculation] = runCalculation($db, $session_id, $user_id, $state, $state['pending_item'], floatval($state['pending_price']), $item_type, $history);
-    if ($ef_note) $bot_reply = trim($ef_note) . "\n\n" . $bot_reply;
-    saveAndRespond($db, $session_id, $state, $bot_reply, $calculation, ['Check another item', 'Compare', 'Run a stress test', 'Reset budget']);
-  } elseif (!empty($state['pending_goal'])) {
-    $state['step'] = 'item'; $state['pending_item'] = $state['pending_goal']; $state['expected_next'] = 'item_price';
-    saveAndRespond($db, $session_id, $state, 'Savings of £' . number_format($price, 2) . ' noted.' . $ef_note . "\n\nNow - how much does the " . $state['pending_goal'] . " cost?", null, ['£500', '£1000', '£5000', '£10000', 'Other']);
-  } else {
-    $state['step'] = 'item';
-    saveAndRespond($db, $session_id, $state, 'Savings of £' . number_format($price, 2) . ' noted.' . $ef_note . "\n\nWhat would you like to buy or check?", null, ['A laptop £800', 'A phone £600', 'A car £10k', 'A subscription', 'Other']);
-  }
-}
-
-// Item step with price
-if ($state['step'] === 'item' && $price && $price > 0 && !in_array($intent, ['income_figure', 'expenses_figure', 'savings_figure'])) {
-  $item_name = !empty($state['pending_item']) ? $state['pending_item'] : cleanItemName($message);
-  $item_type = $state['pending_type'] ?? (isRecurring($message) ? 'recurring' : 'one-time');
-  [$bot_reply, $calculation] = runCalculation($db, $session_id, $user_id, $state, $item_name, $price, $item_type, $history);
-  saveAndRespond($db, $session_id, $state, $bot_reply, $calculation, ['Check another item', 'Compare', 'Run a stress test', 'Reset budget']);
-}
-
-// Item without price
-if (in_array($intent, ['item_without_price', 'affordability_request']) && !$price) {
-  $item_name = !empty($facts['item_name']) ? $facts['item_name'] : cleanItemName($message);
-  if (strlen($item_name) > 1) {
-    if (empty($state['income'])) {
-      $state['pending_goal'] = $item_name; $state['step'] = 'income'; $state['expected_next'] = 'income';
-      saveAndRespond($db, $session_id, $state, "I would love to help you check if you can afford a " . $item_name . ". I need a few numbers first - what is your monthly income after tax?", null, ['£1500', '£2000', '£2500', '£3000', 'Other']);
-    } elseif (empty($state['expenses'])) {
-      $state['pending_goal'] = $item_name; $state['step'] = 'expenses'; $state['expected_next'] = 'expenses';
-      saveAndRespond($db, $session_id, $state, "Checking for a " . $item_name . ". What are your monthly expenses?", null, ['£500', '£800', '£1200', '£1500', 'Other']);
-    } elseif (!isset($state['savings'])) {
-      $state['pending_goal'] = $item_name; $state['step'] = 'savings'; $state['expected_next'] = 'savings';
-      saveAndRespond($db, $session_id, $state, "Checking for a " . $item_name . ". How much do you currently have saved?", null, ['£0', '£500', '£1000', 'Other']);
-    } else {
-      $state['pending_item'] = $item_name; $state['expected_next'] = 'item_price';
-      saveAndRespond($db, $session_id, $state, "How much does the " . $item_name . " cost?", null, ['£500', '£1000', '£5000', '£10000', 'Other']);
-    }
-  }
-}
-
-// Subscription trigger
-if ($intent === 'subscription_request' || preg_match('/\bsubscription\b|\bclass(es)?\b|\bpilates\b|\byoga\b|\bgym\b|\bmembership\b/i', $message)) {
-  if (!$price && $budget_complete) {
-    $state['step'] = 'sub_name'; $state['pending_sub'] = [];
-    $possible_name = cleanItemName($message);
-    if (strlen($possible_name) > 1 && !preg_match('/subscription|class|membership/i', $possible_name)) {
-      $state['pending_sub']['name'] = $possible_name; $state['step'] = 'sub_price';
-      saveAndRespond($db, $session_id, $state, 'How much does ' . $possible_name . ' cost per session or per month?', null, ['£5', '£10', '£20', '£50', 'Other']);
-    }
-    saveAndRespond($db, $session_id, $state, 'What is the subscription or class called?', null, ['Netflix', 'Spotify', 'Gym', 'Pilates', 'Other']);
-  }
-}
-
-// Comparison
-if ($intent === 'comparison' || preg_match('/compare|vs\b|versus|which.*better|both of them|i want both/i', $message)) {
-  if (count($state['checks']) >= 2) {
-    $bot_reply = generateComparison($state['checks'], $state, $history);
-  } elseif (count($state['checks']) === 1) {
-    $state['step'] = 'item';
-    $bot_reply     = 'Your last check was ' . $state['checks'][0]['item_name'] . ' at £' . $state['checks'][0]['item_price'] . '. What would you like to compare it with?';
-    $quick_replies = ['A laptop £800', 'A phone £600', 'Other'];
-  } else {
-    $bot_reply = 'Tell me the first item and price and I will help you compare.'; $quick_replies = ['Other'];
-  }
-  saveAndRespond($db, $session_id, $state, $bot_reply, null, $quick_replies);
-}
-
-// Custom savings calc
-if ($intent === 'custom_savings_calc' || preg_match('/calculate.*based|if I save|can only save|save.*per month|based on.*saving/i', $message)) {
-  if ($price && $price > 0) {
-    $bot_reply = generateCustomSavingsCalc($price, $state, $history);
-    saveAndRespond($db, $session_id, $state, $bot_reply, null, $quick_replies);
-  }
-}
-
-// Stress test
-if ($intent === 'stress_test' || preg_match('/stress.*test|what if.*income|lost.*job|redundan/i', $message)) {
-  if ($price && $price > 0 && $price <= 100) {
-    $new_income  = ($state['income'] ?? 0) * (1 - ($price / 100));
-    $new_surplus = $new_income - ($state['expenses'] ?? 0);
-    $months_run  = ($state['savings'] > 0 && ($state['expenses'] ?? 0) > 0) ? round($state['savings'] / $state['expenses'], 1) : 0;
-    $bot_reply   = $new_surplus > 0
-      ? 'Stress test - with a ' . $price . '% drop, income falls to £' . number_format($new_income, 2) . ' and surplus reduces to £' . number_format($new_surplus, 2) . '.'
-      : 'Stress test - with a ' . $price . '% drop, income falls to £' . number_format($new_income, 2) . ' giving a shortfall of £' . number_format(abs($new_surplus), 2) . '/month. Savings last ' . $months_run . ' months.';
-    $state['step'] = 'followup'; $state['expected_next'] = null;
-    saveAndRespond($db, $session_id, $state, $bot_reply, null, ['Check another item', 'Reset budget', 'Run another stress test', 'Other']);
-  } else {
-    $state['step'] = 'stress_test'; $state['expected_next'] = 'stress_pct';
-    saveAndRespond($db, $session_id, $state, "Let's run a stress test. What percentage drop in income?", null, ['20% drop', '50% drop', 'Total loss', 'Other']);
-  }
-}
-
-// Loan question
-if ($intent === 'loan_question' || preg_match('/\bloan\b|get.*credit|borrow.*money|finance.*it|buy.*on.*credit/i', $message)) {
-  $extra = count($state['checks']) > 0
-    ? "User asking about loan for " . end($state['checks'])['item_name'] . " at £" . number_format(end($state['checks'])['item_price'], 2) . ". Surplus £" . number_format(end($state['checks'])['calc']['surplus'], 2) . "/month, " . formatMonths(end($state['checks'])['calc']['months_to_save']) . " to save without loan. Explain interest risk with exact numbers. Show saving alternative. Not a financial adviser. 3 sentences."
-    : "User asking about a loan. Explain interest, saving is better, not a financial adviser, ask what they want to buy.";
-  $bot_reply = generateCoachReply($message, $state, $history, $extra);
-  saveAndRespond($db, $session_id, $state, $bot_reply, null, $quick_replies);
-}
-
-// Memory check
-if ($intent === 'memory_check') {
-  $parts = [];
-  if (!empty($state['income']))   $parts[] = 'income £' . number_format($state['income'], 2);
-  if (!empty($state['expenses'])) $parts[] = 'expenses £' . number_format($state['expenses'], 2);
-  if (isset($state['savings']))   $parts[] = 'savings £' . number_format($state['savings'], 2);
-  $bot_reply = !empty($parts) ? 'Here is what I have: ' . implode(', ', $parts) . '. Is anything wrong?' : "I do not have any figures yet. Shall we start with your monthly income?";
-  saveAndRespond($db, $session_id, $state, $bot_reply, null, ['That looks right', 'Let me correct something', 'Other']);
-}
-
-// Followup with price
-if ($state['step'] === 'followup' && $price && $price > 0 && $budget_complete && in_array($intent, ['affordability_request', 'item_price'])) {
-  $item_type = isRecurring($message) ? 'recurring' : 'one-time';
-  $item_name = !empty($facts['item_name']) ? $facts['item_name'] : cleanItemName($message);
-  [$bot_reply, $calculation] = runCalculation($db, $session_id, $user_id, $state, $item_name, $price, $item_type, $history);
-  saveAndRespond($db, $session_id, $state, $bot_reply, $calculation, ['Check another item', 'Compare', 'Run a stress test', 'Reset budget']);
-}
-
-// Everything else - Groq handles naturally
-// Check if Groq response contains [READY_TO_CALCULATE] signal
-$bot_reply = generateCoachReply($message, $state, $history);
-
-if (str_contains($bot_reply, '[READY_TO_CALCULATE]')) {
-  $bot_reply = trim(str_replace('[READY_TO_CALCULATE]', '', $bot_reply));
-  $missing   = nextMissingField($state);
-  if ($missing === 'savings') {
-    $state['expected_next'] = 'savings';
-    $state['step']          = 'savings';
-    $bot_reply .= "\n\nOne last thing - how much do you currently have saved?";
-    $quick_replies = ['£0', '£200', '£500', '£1000', 'Other'];
-  } elseif ($missing === 'income') {
-    $state['expected_next'] = 'income'; $state['step'] = 'income';
-    $bot_reply .= "\n\nWhat is your monthly income after tax?";
-    $quick_replies = ['£1500', '£2000', '£2500', '£3000', 'Other'];
-  } elseif ($missing === 'expenses') {
-    $state['expected_next'] = 'expenses'; $state['step'] = 'expenses';
-    $bot_reply .= "\n\nWhat are your monthly expenses?";
-    $quick_replies = ['£500', '£800', '£1200', '£1500', 'Other'];
-  } elseif ($missing === 'item_price') {
-    $state['expected_next'] = 'item_price';
-    $bot_reply .= "\n\nHow much does the " . ($state['pending_item'] ?? 'item') . " cost?";
-    $quick_replies = ['£500', '£1000', '£5000', '£10000', 'Other'];
-  }
-}
-
-if ($state['step'] === 'income')      $quick_replies = ['£1500', '£2000', '£2500', '£3000', 'Other'];
-elseif ($state['step'] === 'expenses') $quick_replies = ['£500', '£800', '£1200', '£1500', 'Other'];
-elseif ($state['step'] === 'savings')  $quick_replies = ['£0', '£500', '£1000', '£2000', 'Other'];
-elseif ($state['step'] === 'item')     $quick_replies = ['A laptop £800', 'A phone £600', 'A car £10k', 'A subscription', 'Other'];
-
-saveAndRespond($db, $session_id, $state, $bot_reply, null, $quick_replies);
+respond($db,$session_id,$state,$bot_reply,$calculation,$quick_replies);

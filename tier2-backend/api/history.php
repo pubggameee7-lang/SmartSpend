@@ -56,12 +56,35 @@ if ($method === 'GET') {
     exit;
   }
 
+  // Enhanced - now includes score history array and expense_ratio for personality label
   if ($action === 'health_score') {
-    $stmt = $db->prepare('SELECT score, trend FROM health_scores WHERE user_id = ? ORDER BY created_at DESC LIMIT 1');
+    $stmt = $db->prepare('SELECT score, trend, created_at FROM health_scores WHERE user_id = ? ORDER BY created_at DESC LIMIT 1');
     $stmt->execute([$user_id]);
-    $score = $stmt->fetch();
-    if ($score) { echo json_encode(['success' => true, 'score' => $score['score'], 'trend' => $score['trend']]); }
-    else { echo json_encode(['success' => false]); }
+    $latest = $stmt->fetch();
+
+    $stmt = $db->prepare('SELECT score, created_at FROM health_scores WHERE user_id = ? ORDER BY created_at ASC LIMIT 10');
+    $stmt->execute([$user_id]);
+    $history = $stmt->fetchAll();
+
+    $stmt = $db->prepare('SELECT income, expenses FROM budgets WHERE session_id IN (SELECT id FROM sessions WHERE user_id = ?) ORDER BY id DESC LIMIT 1');
+    $stmt->execute([$user_id]);
+    $budget = $stmt->fetch();
+    $expense_ratio = null;
+    if ($budget && $budget['income'] > 0) {
+      $expense_ratio = round(($budget['expenses'] / $budget['income']) * 100, 1);
+    }
+
+    if ($latest) {
+      echo json_encode([
+        'success'       => true,
+        'score'         => $latest['score'],
+        'trend'         => $latest['trend'],
+        'history'       => $history,
+        'expense_ratio' => $expense_ratio,
+      ]);
+    } else {
+      echo json_encode(['success' => false]);
+    }
     exit;
   }
 
@@ -71,16 +94,75 @@ if ($method === 'GET') {
     $stmt = $db->prepare('SELECT id FROM sessions WHERE id = ? AND user_id = ?');
     $stmt->execute([$session_id, $user_id]);
     if (!$stmt->fetch()) { http_response_code(403); echo json_encode(['success' => false, 'error' => 'Session not found.']); exit; }
-    $stmt = $db->prepare('SELECT item_name, risk_level, surplus, surplus_after, months_to_save FROM assessments WHERE session_id = ? ORDER BY created_at DESC LIMIT 1');
+    $stmt = $db->prepare('SELECT item_name, item_price, item_type, risk_level, surplus, surplus_after, months_to_save FROM assessments WHERE session_id = ? ORDER BY created_at DESC LIMIT 1');
     $stmt->execute([$session_id]);
     $assessment = $stmt->fetch();
     if ($assessment) {
       echo json_encode(['success' => true, 'assessment' => [
-        'item_name' => clean($assessment['item_name']), 'risk_level' => $assessment['risk_level'],
-        'surplus' => $assessment['surplus'], 'surplus_after' => $assessment['surplus_after'],
+        'item_name'      => clean($assessment['item_name']),
+        'item_price'     => $assessment['item_price'],
+        'item_type'      => $assessment['item_type'],
+        'risk_level'     => $assessment['risk_level'],
+        'surplus'        => $assessment['surplus'],
+        'surplus_after'  => $assessment['surplus_after'],
         'months_to_save' => $assessment['months_to_save'],
       ]]);
-    } else { echo json_encode(['success' => false]); }
+    } else {
+      echo json_encode(['success' => false]);
+    }
+    exit;
+  }
+
+  // NEW: All assessments across all sessions for this user
+  if ($action === 'all_assessments') {
+    $stmt = $db->prepare('
+      SELECT a.item_name, a.item_price, a.item_type, a.risk_level,
+             a.surplus, a.surplus_after, a.months_to_save, a.created_at
+      FROM assessments a
+      JOIN sessions s ON a.session_id = s.id
+      WHERE s.user_id = ?
+      ORDER BY a.created_at DESC
+      LIMIT 50
+    ');
+    $stmt->execute([$user_id]);
+    $assessments = $stmt->fetchAll();
+    $clean_assessments = array_map(function($a) {
+      return [
+        'item_name'      => clean($a['item_name']),
+        'item_price'     => $a['item_price'],
+        'item_type'      => $a['item_type'],
+        'risk_level'     => $a['risk_level'],
+        'surplus'        => $a['surplus'],
+        'surplus_after'  => $a['surplus_after'],
+        'months_to_save' => $a['months_to_save'],
+        'created_at'     => $a['created_at'],
+      ];
+    }, $assessments);
+    echo json_encode(['success' => true, 'assessments' => $clean_assessments]);
+    exit;
+  }
+
+  // NEW: Latest budget for goal progress bars
+  if ($action === 'last_budget') {
+    $stmt = $db->prepare('
+      SELECT b.income, b.expenses, b.savings
+      FROM budgets b
+      JOIN sessions s ON b.session_id = s.id
+      WHERE s.user_id = ?
+      ORDER BY b.id DESC
+      LIMIT 1
+    ');
+    $stmt->execute([$user_id]);
+    $budget = $stmt->fetch();
+    if ($budget) {
+      echo json_encode(['success' => true, 'budget' => [
+        'income'   => $budget['income'],
+        'expenses' => $budget['expenses'],
+        'savings'  => $budget['savings'],
+      ]]);
+    } else {
+      echo json_encode(['success' => false]);
+    }
     exit;
   }
 }

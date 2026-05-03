@@ -5,10 +5,111 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SmartSpend - Dashboard</title>
   <link rel="stylesheet" href="css/style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    .personality-card {
+      background: linear-gradient(135deg, #E0F2F1 0%, #F8FFFE 100%);
+      border: 1.5px solid var(--primary);
+      border-radius: var(--radius);
+      padding: 20px 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .personality-icon {
+      font-size: 2.2rem;
+      flex-shrink: 0;
+    }
+    .personality-label {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--primary-dark);
+      margin-bottom: 4px;
+    }
+    .personality-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    .progress-section { margin-top: 4px; }
+    .progress-goal-name {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text);
+      margin-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+    }
+    .progress-bar-track {
+      background: var(--border);
+      border-radius: 999px;
+      height: 12px;
+      overflow: hidden;
+      margin-bottom: 6px;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--primary), var(--primary-dark));
+      transition: width 1s ease;
+    }
+    .progress-bar-fill.yellow { background: linear-gradient(90deg, #F39C12, #E67E22); }
+    .progress-bar-fill.red    { background: linear-gradient(90deg, #E74C3C, #C0392B); }
+    .progress-meta {
+      font-size: 12px;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .chart-container {
+      position: relative;
+      height: 220px;
+      margin-top: 8px;
+    }
+
+    .items-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .item-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      border-radius: var(--radius-sm);
+      border: 1.5px solid var(--border);
+      font-size: 13px;
+      background: var(--bg);
+    }
+    .item-row-left { display: flex; flex-direction: column; gap: 2px; }
+    .item-name { font-weight: 500; color: var(--text); }
+    .item-meta { color: var(--text-muted); font-size: 12px; }
+    .item-badge {
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+    .item-badge.green  { background: #D4EFDF; color: var(--risk-green); }
+    .item-badge.yellow { background: #FDEBD0; color: var(--risk-amber); }
+    .item-badge.red    { background: #FADBD8; color: var(--risk-red); }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+    }
+
+    @media (max-width: 768px) {
+      .two-col { grid-template-columns: 1fr; }
+    }
+  </style>
 </head>
 <body class="dashboard-page">
 
-  <!-- Header -->
   <header class="header">
     <div class="header-left">
       <h1 class="logo">Smart<span>Spend</span></h1>
@@ -21,24 +122,41 @@
     </div>
   </header>
 
-  <!-- Dashboard content -->
   <div class="dashboard-layout">
 
-    <!-- Health score card -->
-    <div class="card">
-      <h2>Financial Health Score</h2>
-      <div class="health-score-display">
-        <div id="score-circle" class="score-circle">
-          <span id="score-number">--</span>
+    <!-- Spending Personality -->
+    <div id="personality-card" class="personality-card" style="display:none">
+      <div class="personality-icon" id="personality-icon">💡</div>
+      <div>
+        <div class="personality-label" id="personality-label">Loading...</div>
+        <div class="personality-desc" id="personality-desc"></div>
+      </div>
+    </div>
+
+    <!-- Health Score + Chart -->
+    <div class="two-col">
+      <div class="card">
+        <h2>Financial Health Score</h2>
+        <div class="health-score-display">
+          <div id="score-circle" class="score-circle">
+            <span id="score-number">--</span>
+          </div>
+          <div class="score-info">
+            <p id="score-trend" class="score-trend"></p>
+            <p class="score-desc">Based on your income, expenses, savings and spending decisions.</p>
+          </div>
         </div>
-        <div class="score-info">
-          <p id="score-trend" class="score-trend"></p>
-          <p class="score-desc">Based on your income, expenses, savings and spending decisions.</p>
+      </div>
+
+      <div class="card">
+        <h2>Score Trend</h2>
+        <div class="chart-container">
+          <canvas id="scoreChart"></canvas>
         </div>
       </div>
     </div>
 
-    <!-- Stats row -->
+    <!-- Stats Row -->
     <div class="stats-row">
       <div class="stat-card">
         <p class="stat-label">Total Sessions</p>
@@ -54,7 +172,21 @@
       </div>
     </div>
 
-    <!-- Session history -->
+    <!-- Goal Progress -->
+    <div class="card" id="goal-card" style="display:none">
+      <h2>Goal Progress</h2>
+      <div id="goal-progress-list" class="progress-section"></div>
+    </div>
+
+    <!-- Items Checked -->
+    <div class="card">
+      <h2>Items Checked</h2>
+      <div id="items-list" class="items-list">
+        <p class="empty-msg">No items checked yet.</p>
+      </div>
+    </div>
+
+    <!-- Session History -->
     <div class="card">
       <h2>Session History</h2>
       <div id="session-history" class="session-history">
@@ -65,6 +197,5 @@
   </div>
 
   <script src="js/dashboard.js"></script>
-
 </body>
 </html>

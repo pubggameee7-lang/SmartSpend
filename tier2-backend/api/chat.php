@@ -46,6 +46,22 @@ foreach (['active_goal','loan','subscriptions','checks'] as $k) {
   if (!isset($state[$k])) $state[$k] = in_array($k, ['subscriptions','checks']) ? [] : null;
 }
 
+// Cross-session memory: load saved figures from user account if not set in current state
+if (empty($state['income']) || empty($state['expenses']) || !isset($state['savings'])) {
+  $stmt = $db->prepare('SELECT saved_income, saved_expenses, saved_savings FROM users WHERE id = ?');
+  $stmt->execute([$user_id]);
+  $saved = $stmt->fetch();
+  if ($saved) {
+    if (empty($state['income'])    && !empty($saved['saved_income']))   $state['income']   = floatval($saved['saved_income']);
+    if (empty($state['expenses'])  && !empty($saved['saved_expenses'])) $state['expenses'] = floatval($saved['saved_expenses']);
+    if (!isset($state['savings'])  && $saved['saved_savings'] !== null) $state['savings']  = floatval($saved['saved_savings']);
+    // If all three loaded from memory and step is greeting, skip to active
+    if (!empty($state['income']) && !empty($state['expenses']) && isset($state['savings']) && $state['step'] === 'greeting') {
+      $state['step'] = 'active';
+    }
+  }
+}
+
 $stmt = $db->prepare('SELECT role, content FROM messages WHERE session_id = ? ORDER BY created_at DESC LIMIT 16');
 $stmt->execute([$session_id]);
 $history_raw = array_reverse($stmt->fetchAll());
@@ -174,12 +190,25 @@ if ($state['step'] === 'greeting') {
   $item_cost = ($num && $num > 50) ? $num : null;
   $item_type = $goal_type_hint ?? (preg_match('/per month|monthly|subscription|recurring/i', $message) ? 'recurring' : 'one-time');
 
+  // Check if returning user with saved figures
+  $has_memory = !empty($state['income']) && !empty($state['expenses']) && isset($state['savings']);
+
   if ($item_name && strlen(trim($item_name)) > 1) {
     $state['active_goal'] = ['name' => trim($item_name), 'cost' => $item_cost, 'type' => $item_type];
-    $cost_str  = $item_cost ? ' at £'.number_format($item_cost,2) : '';
-    $bot_reply = "Great - {$item_name}{$cost_str} is a solid goal. To check if that is achievable I need a few numbers first. What is your monthly income after tax?";
+    $cost_str = $item_cost ? ' at £'.number_format($item_cost,2) : '';
+    if ($has_memory) {
+      $bot_reply = "Welcome back! I still have your figures - income £".number_format($state['income'],2).", expenses £".number_format($state['expenses'],2).", savings £".number_format($state['savings'],2).". Let me check ".trim($item_name).$cost_str." for you.";
+      $state['step'] = 'active';
+    } else {
+      $bot_reply = "Great - {$item_name}{$cost_str} is a solid goal. To check if that is achievable I need a few numbers first. What is your monthly income after tax?";
+    }
   } else {
-    $bot_reply = "Hello! I am SmartSpend, your personal money coach. I can help you work out if you can afford something, plan your savings, and give you honest budget guidance.\n\nTo get started - what is your monthly income after tax?";
+    if ($has_memory) {
+      $bot_reply = "Welcome back! I still have your budget saved - income £".number_format($state['income'],2).", expenses £".number_format($state['expenses'],2).", savings £".number_format($state['savings'],2).". What would you like to check today?";
+      $state['step'] = 'active';
+    } else {
+      $bot_reply = "Hello! I am SmartSpend, your personal money coach. I can help you work out if you can afford something, plan your savings, and give you honest budget guidance.\n\nTo get started - what is your monthly income after tax?";
+    }
   }
   respond($db,$session_id,$state,$bot_reply,null,['£1500','£2000','£2500','£3000','Other']);
 }
@@ -213,6 +242,9 @@ if ($state['step'] === 'savings') {
   if ($num !== null && $num >= 0) {
     $state['savings'] = $num;
     $state['step']    = 'active';
+    // Save all three to user account for cross-session memory
+    $db->prepare('UPDATE users SET saved_income=?, saved_expenses=?, saved_savings=? WHERE id=?')
+       ->execute([$state['income'], $state['expenses'], $num, $user_id]);
     $ef_note = '';
     $rec = $state['expenses'] * 3;
     if ($num < $rec && !$state['emergency_fund_warned']) {

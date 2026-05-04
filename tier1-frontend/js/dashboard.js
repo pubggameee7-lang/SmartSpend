@@ -141,7 +141,7 @@ function renderGoalProgress(assessments, lastBudget) {
 
   // Group by item name, take most recent per item
   const seen = {};
-  assessments.forEach(a => {
+  assessments.forEach((a, i) => {
     if (!seen[a.item_name]) seen[a.item_name] = a;
   });
 
@@ -187,7 +187,7 @@ function renderItems(assessments) {
   }
 
   itemsList.innerHTML = '';
-  assessments.forEach(a => {
+  assessments.forEach((a, i) => {
     const risk      = a.risk_level;
     const riskLabel = risk === 'green' ? 'Low Risk' : risk === 'yellow' ? 'Moderate Risk' : 'High Risk';
     const months    = parseInt(a.months_to_save);
@@ -196,15 +196,159 @@ function renderItems(assessments) {
                         ? Math.floor(months / 12) + 'yr ' + (months % 12 > 0 ? months % 12 + 'mo' : '')
                         : months + ' month' + (months > 1 ? 's' : '');
 
+    const exportId = 'export-' + i;
     itemsList.innerHTML += `
       <div class="item-row">
         <div class="item-row-left">
           <span class="item-name">${a.item_name}</span>
           <span class="item-meta">£${parseFloat(a.item_price).toLocaleString()} · ${a.item_type} · ${timeStr} to save</span>
         </div>
-        <span class="item-badge ${risk}">${riskLabel}</span>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="item-badge ${risk}">${riskLabel}</span>
+          <button id="${exportId}" class="btn-outline" style="font-size:11px;padding:3px 10px" title="Export PDF">⬇ PDF</button>
+        </div>
       </div>`;
+    // Store assessment ref for export button
+    (function(assessment, idx) {
+      setTimeout(function() {
+        const btn = document.getElementById('export-' + idx);
+        if (btn) btn.addEventListener('click', function() {
+          fetch('../tier2-backend/api/history.php?action=last_budget').then(r=>r.json()).then(function(bd) {
+            const budget = bd.success ? bd.budget : null;
+            const pLabel = document.getElementById('personality-label');
+            const pDesc  = document.getElementById('personality-desc');
+            const pers   = pLabel && pLabel.textContent !== 'Loading...' ? {label: pLabel.textContent, desc: pDesc.textContent} : null;
+            exportPDF(assessment, budget, pers);
+          });
+        });
+      }, 100);
+    })(a, i);
   });
+}
+
+
+// ── Export PDF from dashboard ─────────────────────────────
+function exportPDF(assessment, budget, personality) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  const teal = [0, 180, 166];
+  const dark = [44, 62, 80];
+  const grey = [127, 140, 141];
+
+  // Header
+  doc.setFillColor(...teal);
+  doc.rect(0, 0, 210, 28, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(20);
+  doc.setFont('helvetica', 'bold');
+  doc.text('SmartSpend', 14, 16);
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.text('Budget Assessment Report', 14, 23);
+  doc.text('Generated: ' + new Date().toLocaleDateString('en-GB'), 140, 23);
+
+  // Disclaimer
+  doc.setTextColor(...grey);
+  doc.setFontSize(8);
+  doc.text('Not a financial adviser - for educational purposes only.', 14, 35);
+
+  let y = 46;
+
+  // Budget snapshot
+  doc.setTextColor(...dark);
+  doc.setFontSize(12);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Your Budget Snapshot', 14, y); y += 8;
+
+  if (budget) {
+    const surplus = parseFloat(budget.income) - parseFloat(budget.expenses);
+    const rows = [
+      ['Monthly Income', '£' + parseFloat(budget.income).toLocaleString('en-GB', {minimumFractionDigits:2})],
+      ['Monthly Expenses', '£' + parseFloat(budget.expenses).toLocaleString('en-GB', {minimumFractionDigits:2})],
+      ['Current Savings', '£' + parseFloat(budget.savings).toLocaleString('en-GB', {minimumFractionDigits:2})],
+      ['Monthly Surplus', '£' + surplus.toLocaleString('en-GB', {minimumFractionDigits:2})],
+    ];
+    rows.forEach(function(row) {
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(...grey);
+      doc.text(row[0], 14, y);
+      doc.setTextColor(...dark);
+      doc.setFont('helvetica', 'bold');
+      doc.text(row[1], 100, y);
+      y += 7;
+    });
+  }
+
+  y += 6;
+
+  // Assessment result
+  doc.setTextColor(...dark);
+  doc.setFontSize(12);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Assessment Result', 14, y); y += 8;
+
+  const risk = assessment.risk_level;
+  const riskLabel = risk === 'green' ? 'LOW RISK' : risk === 'yellow' ? 'MODERATE RISK' : 'HIGH RISK';
+  const riskColour = risk === 'green' ? [39,174,96] : risk === 'yellow' ? [243,156,18] : [231,76,60];
+
+  doc.setFillColor(...riskColour);
+  doc.setTextColor(255,255,255);
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'bold');
+  doc.roundedRect(14, y-5, 36, 8, 2, 2, 'F');
+  doc.text(riskLabel, 16, y); y += 10;
+
+  const months = parseInt(assessment.months_to_save);
+  const timeStr = isNaN(months) || months === 0 ? 'Already affordable' :
+    months > 12 ? Math.floor(months/12) + ' year' + (Math.floor(months/12)>1?'s':'') + (months%12>0?' and '+months%12+' months':'') :
+    months + ' month' + (months>1?'s':'');
+
+  const aRows = [
+    ['Item', assessment.item_name],
+    ['Price', '£' + parseFloat(assessment.item_price).toLocaleString('en-GB', {minimumFractionDigits:2})],
+    ['Type', assessment.item_type],
+    ['Time to save', timeStr],
+  ];
+
+  aRows.forEach(function(row) {
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...grey);
+    doc.text(row[0], 14, y);
+    doc.setTextColor(...dark);
+    doc.setFont('helvetica', 'bold');
+    doc.text(String(row[1]), 100, y);
+    y += 7;
+  });
+
+  y += 6;
+
+  // Spending personality
+  if (personality) {
+    doc.setFillColor(224, 242, 241);
+    doc.roundedRect(14, y-5, 182, 20, 3, 3, 'F');
+    doc.setTextColor(...teal);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Spending Personality: ' + personality.label, 18, y+2);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...dark);
+    doc.setFontSize(9);
+    doc.text(personality.desc, 18, y+9, { maxWidth: 175 });
+    y += 26;
+  }
+
+  // Footer
+  doc.setDrawColor(...teal);
+  doc.setLineWidth(0.5);
+  doc.line(14, 280, 196, 280);
+  doc.setTextColor(...grey);
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  doc.text('SmartSpend - Not a financial adviser. For educational purposes only.', 14, 286);
+
+  doc.save('SmartSpend-Report-' + new Date().toISOString().slice(0,10) + '.pdf');
 }
 
 // ── Check auth ────────────────────────────────────────────

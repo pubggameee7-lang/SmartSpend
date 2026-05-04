@@ -1,7 +1,8 @@
-// v3
+// v4 - with PDF export
 const API_BASE = '../tier2-backend/api';
 
 let currentSessionId = null;
+let lastBudgetSnapshot = null; // stores latest income/expenses/savings for PDF
 
 const chatBox               = document.getElementById('chat-box');
 const userInput             = document.getElementById('user-input');
@@ -159,9 +160,7 @@ function clearChat() {
 
 function clearQuickReplies() {
   if (quickRepliesContainer) quickRepliesContainer.innerHTML = '';
-  // Remove any existing toast
   document.querySelectorAll('.other-toast').forEach(t => t.remove());
-  // Reset input styling
   userInput.style.borderColor = '';
   userInput.style.boxShadow   = '';
   userInput.placeholder       = 'Type your message here...';
@@ -176,6 +175,113 @@ function showWelcome() {
       <p class="example">Try saying: "Hi" or "Can I afford a new car?"</p>
     </div>
   `;
+}
+
+// ── PDF Export ────────────────────────────────────────────
+function exportResultPDF(calc) {
+  if (!window.jspdf) { alert('PDF library not loaded. Please check your internet connection.'); return; }
+  const { jsPDF } = window.jspdf;
+  const doc   = new jsPDF();
+  const teal  = [0, 180, 166];
+  const dark  = [44, 62, 80];
+  const grey  = [127, 140, 141];
+
+  // Header bar
+  doc.setFillColor(...teal);
+  doc.rect(0, 0, 210, 28, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(20);
+  doc.setFont('helvetica', 'bold');
+  doc.text('SmartSpend', 14, 16);
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.text('Budget Assessment Report', 14, 23);
+  doc.text('Generated: ' + new Date().toLocaleDateString('en-GB'), 140, 23);
+
+  // Disclaimer
+  doc.setTextColor(...grey);
+  doc.setFontSize(8);
+  doc.text('Not a financial adviser - for educational purposes only.', 14, 35);
+
+  let y = 46;
+
+  // Budget snapshot (from live state if available)
+  if (lastBudgetSnapshot) {
+    doc.setTextColor(...dark);
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Your Budget Snapshot', 14, y); y += 8;
+
+    const surplus = parseFloat(lastBudgetSnapshot.income) - parseFloat(lastBudgetSnapshot.expenses);
+    [
+      ['Monthly Income',   '£' + parseFloat(lastBudgetSnapshot.income).toLocaleString('en-GB', {minimumFractionDigits:2})],
+      ['Monthly Expenses', '£' + parseFloat(lastBudgetSnapshot.expenses).toLocaleString('en-GB', {minimumFractionDigits:2})],
+      ['Current Savings',  '£' + parseFloat(lastBudgetSnapshot.savings).toLocaleString('en-GB', {minimumFractionDigits:2})],
+      ['Monthly Surplus',  '£' + surplus.toLocaleString('en-GB', {minimumFractionDigits:2})],
+    ].forEach(function(row) {
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(...grey);
+      doc.text(row[0], 14, y);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(...dark);
+      doc.text(row[1], 100, y);
+      y += 7;
+    });
+    y += 6;
+  }
+
+  // Assessment result
+  doc.setTextColor(...dark);
+  doc.setFontSize(12);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Assessment Result', 14, y); y += 8;
+
+  const risk       = calc.risk_level;
+  const riskLabel  = risk === 'green' ? 'LOW RISK' : risk === 'yellow' ? 'MODERATE RISK' : 'HIGH RISK';
+  const riskColour = risk === 'green' ? [39,174,96] : risk === 'yellow' ? [243,156,18] : [231,76,60];
+
+  doc.setFillColor(...riskColour);
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'bold');
+  doc.roundedRect(14, y - 5, 40, 8, 2, 2, 'F');
+  doc.text(riskLabel, 16, y); y += 10;
+
+  const months  = parseInt(calc.months_to_save);
+  const timeStr = isNaN(months) || months === 0 ? 'Already affordable'
+    : months > 12
+      ? Math.floor(months / 12) + ' year' + (Math.floor(months / 12) > 1 ? 's' : '') + (months % 12 > 0 ? ' and ' + months % 12 + ' months' : '')
+      : months + ' month' + (months > 1 ? 's' : '');
+
+  [
+    ['Item',           calc.item_name],
+    ['Price',          '£' + Number(calc.item_price).toFixed(2)],
+    ['Type',           calc.item_type],
+    ['Monthly Surplus','£' + Number(calc.surplus).toFixed(2)],
+    ['Time to Save',   timeStr],
+    ['Health Score',   calc.health_score + '/100'],
+  ].forEach(function(row) {
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...grey);
+    doc.text(row[0], 14, y);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...dark);
+    doc.text(String(row[1]), 100, y);
+    y += 7;
+  });
+
+  // Footer
+  doc.setDrawColor(...teal);
+  doc.setLineWidth(0.5);
+  doc.line(14, 280, 196, 280);
+  doc.setTextColor(...grey);
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  doc.text('SmartSpend - Not a financial adviser. For educational purposes only.', 14, 286);
+
+  doc.save('SmartSpend-' + (calc.item_name || 'Report').replace(/\s+/g, '-') + '-' + new Date().toISOString().slice(0, 10) + '.pdf');
 }
 
 function addMessage(role, content, calculation = null) {
@@ -196,6 +302,26 @@ function addMessage(role, content, calculation = null) {
 
   if (calculation) {
     bubble.appendChild(buildResultCard(calculation));
+
+    // Store budget snapshot for PDF
+    if (calculation.surplus !== undefined) {
+      lastBudgetSnapshot = {
+        income:   calculation.surplus + (lastBudgetSnapshot ? lastBudgetSnapshot.expenses : 0),
+        expenses: lastBudgetSnapshot ? lastBudgetSnapshot.expenses : 0,
+        savings:  lastBudgetSnapshot ? lastBudgetSnapshot.savings : 0,
+      };
+    }
+
+    // Export PDF button
+    const exportBtn = document.createElement('button');
+    exportBtn.className   = 'btn-secondary';
+    exportBtn.textContent = '⬇ Export PDF';
+    exportBtn.style.marginTop  = '10px';
+    exportBtn.style.fontSize   = '12px';
+    exportBtn.style.padding    = '6px 14px';
+    exportBtn.style.display    = 'block';
+    exportBtn.addEventListener('click', function() { exportResultPDF(calculation); });
+    bubble.appendChild(exportBtn);
   }
 
   wrap.appendChild(bubble);
@@ -282,7 +408,6 @@ function renderQuickReplies(replies) {
       btn.addEventListener('click', function() {
         clearQuickReplies();
 
-        // Toast bubble
         var toast = document.createElement('div');
         toast.className   = 'other-toast';
         toast.textContent = 'Type your answer in the box below';
@@ -302,13 +427,11 @@ function renderQuickReplies(replies) {
         toast.style.pointerEvents = 'none';
         document.body.appendChild(toast);
 
-        // Strong highlight on main input
         userInput.placeholder    = 'Type your answer here...';
         userInput.style.borderColor = '#00B4A6';
         userInput.style.boxShadow   = '0 0 0 5px rgba(0, 180, 166, 0.5)';
         userInput.focus();
 
-        // Remove toast and highlight when user starts typing
         userInput.addEventListener('input', function() {
           toast.style.opacity = '0';
           setTimeout(function() { if (toast.parentNode) toast.remove(); }, 400);
@@ -316,7 +439,6 @@ function renderQuickReplies(replies) {
           userInput.style.boxShadow   = '';
         }, { once: true });
 
-        // Auto remove toast after 3 seconds
         setTimeout(function() {
           toast.style.opacity = '0';
           setTimeout(function() { if (toast.parentNode) toast.remove(); }, 400);
@@ -359,6 +481,12 @@ async function sendMessage() {
     removeTyping();
 
     if (data.success) {
+      // Update budget snapshot if calculation returned
+      if (data.calculation) {
+        fetch(API_BASE + '/history.php?action=last_budget').then(r => r.json()).then(function(bd) {
+          if (bd.success && bd.budget) lastBudgetSnapshot = bd.budget;
+        });
+      }
       addMessage('bot', data.bot_reply, data.calculation || null);
       renderQuickReplies(data.quick_replies || []);
     } else {

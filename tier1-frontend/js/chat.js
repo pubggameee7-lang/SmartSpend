@@ -177,111 +177,72 @@ function showWelcome() {
   `;
 }
 
-// ── PDF Export ────────────────────────────────────────────
+// ── PDF Export via print ─────────────────────────────────
 function exportResultPDF(calc) {
-  if (!window.jspdf) { alert('PDF library not loaded. Please check your internet connection.'); return; }
-  const { jsPDF } = window.jspdf;
-  const doc   = new jsPDF();
-  const teal  = [0, 180, 166];
-  const dark  = [44, 62, 80];
-  const grey  = [127, 140, 141];
+  var risk      = calc.risk_level;
+  var riskLabel = risk === 'green' ? 'LOW RISK' : risk === 'yellow' ? 'MODERATE RISK' : 'HIGH RISK';
+  var riskColour= risk === 'green' ? '#27AE60' : risk === 'yellow' ? '#F39C12' : '#E74C3C';
+  var months    = parseInt(calc.months_to_save);
+  var timeStr   = isNaN(months) || months === 0 ? 'Already affordable'
+    : months > 12
+      ? Math.floor(months/12) + ' year' + (Math.floor(months/12)>1?'s':'') + (months%12>0?' and '+months%12+' months':'')
+      : months + ' month' + (months>1?'s':'');
 
-  // Header bar
-  doc.setFillColor(...teal);
-  doc.rect(0, 0, 210, 28, 'F');
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(20);
-  doc.setFont('helvetica', 'bold');
-  doc.text('SmartSpend', 14, 16);
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'normal');
-  doc.text('Budget Assessment Report', 14, 23);
-  doc.text('Generated: ' + new Date().toLocaleDateString('en-GB'), 140, 23);
-
-  // Disclaimer
-  doc.setTextColor(...grey);
-  doc.setFontSize(8);
-  doc.text('Not a financial adviser - for educational purposes only.', 14, 35);
-
-  let y = 46;
-
-  // Budget snapshot (from live state if available)
+  var snapshot = '';
   if (lastBudgetSnapshot) {
-    doc.setTextColor(...dark);
-    doc.setFontSize(12);
-    doc.setFont('helvetica', 'bold');
-    doc.text('Your Budget Snapshot', 14, y); y += 8;
-
-    const surplus = parseFloat(lastBudgetSnapshot.income) - parseFloat(lastBudgetSnapshot.expenses);
-    [
-      ['Monthly Income',   '£' + parseFloat(lastBudgetSnapshot.income).toLocaleString('en-GB', {minimumFractionDigits:2})],
-      ['Monthly Expenses', '£' + parseFloat(lastBudgetSnapshot.expenses).toLocaleString('en-GB', {minimumFractionDigits:2})],
-      ['Current Savings',  '£' + parseFloat(lastBudgetSnapshot.savings).toLocaleString('en-GB', {minimumFractionDigits:2})],
-      ['Monthly Surplus',  '£' + surplus.toLocaleString('en-GB', {minimumFractionDigits:2})],
-    ].forEach(function(row) {
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'normal');
-      doc.setTextColor(...grey);
-      doc.text(row[0], 14, y);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(...dark);
-      doc.text(row[1], 100, y);
-      y += 7;
-    });
-    y += 6;
+    var surplus = parseFloat(lastBudgetSnapshot.income) - parseFloat(lastBudgetSnapshot.expenses);
+    snapshot = '<div class="section"><h2>Your Budget Snapshot</h2>' +
+      '<table><tr><td>Monthly Income</td><td><strong>£' + parseFloat(lastBudgetSnapshot.income).toFixed(2) + '</strong></td></tr>' +
+      '<tr><td>Monthly Expenses</td><td><strong>£' + parseFloat(lastBudgetSnapshot.expenses).toFixed(2) + '</strong></td></tr>' +
+      '<tr><td>Current Savings</td><td><strong>£' + parseFloat(lastBudgetSnapshot.savings).toFixed(2) + '</strong></td></tr>' +
+      '<tr><td>Monthly Surplus</td><td><strong>£' + surplus.toFixed(2) + '</strong></td></tr>' +
+      '</table></div>';
   }
 
-  // Assessment result
-  doc.setTextColor(...dark);
-  doc.setFontSize(12);
-  doc.setFont('helvetica', 'bold');
-  doc.text('Assessment Result', 14, y); y += 8;
-
-  const risk       = calc.risk_level;
-  const riskLabel  = risk === 'green' ? 'LOW RISK' : risk === 'yellow' ? 'MODERATE RISK' : 'HIGH RISK';
-  const riskColour = risk === 'green' ? [39,174,96] : risk === 'yellow' ? [243,156,18] : [231,76,60];
-
-  doc.setFillColor(...riskColour);
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'bold');
-  doc.roundedRect(14, y - 5, 40, 8, 2, 2, 'F');
-  doc.text(riskLabel, 16, y); y += 10;
-
-  const months  = parseInt(calc.months_to_save);
-  const timeStr = isNaN(months) || months === 0 ? 'Already affordable'
-    : months > 12
-      ? Math.floor(months / 12) + ' year' + (Math.floor(months / 12) > 1 ? 's' : '') + (months % 12 > 0 ? ' and ' + months % 12 + ' months' : '')
-      : months + ' month' + (months > 1 ? 's' : '');
-
-  [
-    ['Item',           calc.item_name],
-    ['Price',          '£' + Number(calc.item_price).toFixed(2)],
-    ['Type',           calc.item_type],
-    ['Monthly Surplus','£' + Number(calc.surplus).toFixed(2)],
-    ['Time to Save',   timeStr],
-    ['Health Score',   calc.health_score + '/100'],
-  ].forEach(function(row) {
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(...grey);
-    doc.text(row[0], 14, y);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(...dark);
-    doc.text(String(row[1]), 100, y);
-    y += 7;
-  });
-
-  // Footer
-  doc.setDrawColor(...teal);
-  doc.setLineWidth(0.5);
-  doc.line(14, 280, 196, 280);
-  doc.setTextColor(...grey);
-  doc.setFontSize(8);
-  doc.setFont('helvetica', 'normal');
-  doc.text('SmartSpend - Not a financial adviser. For educational purposes only.', 14, 286);
-
-  doc.save('SmartSpend-' + (calc.item_name || 'Report').replace(/\s+/g, '-') + '-' + new Date().toISOString().slice(0, 10) + '.pdf');
+  var win = window.open('', '_blank');
+  win.document.write(`<!DOCTYPE html><html><head><title>SmartSpend Report</title>
+  <style>
+    body { font-family: 'Helvetica', sans-serif; color: #2C3E50; margin: 0; padding: 0; }
+    .header { background: #00B4A6; color: white; padding: 20px 30px; }
+    .header h1 { margin: 0; font-size: 24px; }
+    .header p { margin: 4px 0 0; font-size: 12px; opacity: 0.85; }
+    .disclaimer { background: #E0F2F1; color: #00B4A6; font-size: 11px; padding: 8px 30px; }
+    .content { padding: 24px 30px; }
+    .section { margin-bottom: 24px; }
+    h2 { font-size: 14px; color: #2C3E50; border-bottom: 1px solid #E0F2F1; padding-bottom: 6px; margin-bottom: 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    td { padding: 6px 4px; border-bottom: 1px solid #f0f0f0; }
+    td:last-child { text-align: right; }
+    .badge { display: inline-block; padding: 4px 14px; border-radius: 20px; font-size: 12px; font-weight: bold; color: white; background: ${riskColour}; margin-bottom: 12px; }
+    .footer { margin-top: 40px; padding-top: 12px; border-top: 1px solid #E0F2F1; font-size: 10px; color: #7F8C8D; }
+    .date { float: right; font-size: 11px; opacity: 0.7; }
+    @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+  </style></head><body>
+  <div class="header">
+    <span class="date">${new Date().toLocaleDateString('en-GB')}</span>
+    <h1>SmartSpend</h1>
+    <p>Budget Assessment Report</p>
+  </div>
+  <div class="disclaimer">Not a financial adviser - for educational purposes only.</div>
+  <div class="content">
+    ${snapshot}
+    <div class="section">
+      <h2>Assessment Result</h2>
+      <div class="badge">${riskLabel}</div>
+      <table>
+        <tr><td>Item</td><td><strong>${calc.item_name}</strong></td></tr>
+        <tr><td>Price</td><td><strong>£${Number(calc.item_price).toFixed(2)}</strong></td></tr>
+        <tr><td>Type</td><td>${calc.item_type}</td></tr>
+        <tr><td>Monthly Surplus</td><td>£${Number(calc.surplus).toFixed(2)}</td></tr>
+        <tr><td>Time to Save</td><td>${timeStr}</td></tr>
+        <tr><td>Health Score</td><td>${calc.health_score}/100</td></tr>
+      </table>
+    </div>
+    <div class="footer">SmartSpend - Not a financial adviser. For educational purposes only.</div>
+  </div>
+  <script>window.onload = function() { window.print(); }</script>
+  </body></html>`);
+  win.document.close();
 }
 
 function addMessage(role, content, calculation = null) {

@@ -160,6 +160,7 @@ function clearChat() {
 
 function clearQuickReplies() {
   if (quickRepliesContainer) quickRepliesContainer.innerHTML = '';
+  document.querySelectorAll('.quick-replies-inline').forEach(function(el) { el.remove(); });
   document.querySelectorAll('.other-toast').forEach(t => t.remove());
   userInput.style.borderColor = '';
   userInput.style.boxShadow   = '';
@@ -360,46 +361,53 @@ function renderQuickReplies(replies) {
   clearQuickReplies();
   if (!replies || replies.length === 0) return;
 
+  // Find last bot bubble and append replies inside it
+  var botMessages = chatBox.querySelectorAll('.message.bot');
+  var lastBotBubble = botMessages.length > 0 ? botMessages[botMessages.length - 1].querySelector('.bubble') : null;
+
+  var container = document.createElement('div');
+  container.className = 'quick-replies-inline';
+  container.style.display = 'flex';
+  container.style.flexWrap = 'wrap';
+  container.style.gap = '8px';
+  container.style.marginTop = '10px';
+
   replies.forEach(function(reply) {
-    var btn     = document.createElement('button');
-    btn.className   = 'quick-reply-btn';
+    var btn = document.createElement('button');
+    btn.className = 'quick-reply-btn';
     btn.textContent = reply;
 
     if (reply === 'Other') {
       btn.addEventListener('click', function() {
         clearQuickReplies();
-
         var toast = document.createElement('div');
-        toast.className   = 'other-toast';
+        toast.className = 'other-toast';
         toast.textContent = 'Type your answer in the box below';
-        toast.style.position   = 'fixed';
-        toast.style.bottom     = '110px';
-        toast.style.left       = '50%';
-        toast.style.transform  = 'translateX(-50%)';
+        toast.style.position = 'fixed';
+        toast.style.bottom = '110px';
+        toast.style.left = '50%';
+        toast.style.transform = 'translateX(-50%)';
         toast.style.background = '#2C3E50';
-        toast.style.color      = '#fff';
-        toast.style.padding    = '8px 18px';
+        toast.style.color = '#fff';
+        toast.style.padding = '8px 18px';
         toast.style.borderRadius = '20px';
-        toast.style.fontSize   = '13px';
+        toast.style.fontSize = '13px';
         toast.style.fontFamily = 'Poppins, sans-serif';
-        toast.style.zIndex     = '999';
-        toast.style.opacity    = '1';
+        toast.style.zIndex = '999';
+        toast.style.opacity = '1';
         toast.style.transition = 'opacity 0.4s';
         toast.style.pointerEvents = 'none';
         document.body.appendChild(toast);
-
-        userInput.placeholder    = 'Type your answer here...';
+        userInput.placeholder = 'Type your answer here...';
         userInput.style.borderColor = '#00B4A6';
-        userInput.style.boxShadow   = '0 0 0 5px rgba(0, 180, 166, 0.5)';
+        userInput.style.boxShadow = '0 0 0 5px rgba(0, 180, 166, 0.5)';
         userInput.focus();
-
         userInput.addEventListener('input', function() {
           toast.style.opacity = '0';
           setTimeout(function() { if (toast.parentNode) toast.remove(); }, 400);
           userInput.style.borderColor = '';
-          userInput.style.boxShadow   = '';
+          userInput.style.boxShadow = '';
         }, { once: true });
-
         setTimeout(function() {
           toast.style.opacity = '0';
           setTimeout(function() { if (toast.parentNode) toast.remove(); }, 400);
@@ -412,9 +420,16 @@ function renderQuickReplies(replies) {
         sendMessage();
       });
     }
-
-    quickRepliesContainer.appendChild(btn);
+    container.appendChild(btn);
   });
+
+  var lastBotMessage = botMessages.length > 0 ? botMessages[botMessages.length - 1] : null;
+  if (lastBotMessage) {
+    lastBotMessage.parentNode.insertBefore(container, lastBotMessage.nextSibling);
+  } else {
+    quickRepliesContainer.appendChild(container);
+  }
+  chatBox.scrollTop = chatBox.scrollHeight;
 }
 
 async function sendMessage() {

@@ -348,7 +348,7 @@ function getMissingBudgetField(array $state): ?string {
 }
 
 function getAIExplanation(string $context, string $risk_level): string {
-  $system = "You are SmartSpend, a friendly UK money coach. Write exactly 2 short sentences using ONLY the numbers given to you. Do NOT calculate or invent any figures. Sentence 1: state the risk and key numbers. Sentence 2: one warm practical tip. No specific financial products.";
+  $system = "You are SmartSpend, a friendly UK money coach. Write exactly 2 short sentences using ONLY the numbers given to you. Do NOT calculate or invent any figures. ALWAYS label every number e.g. 'income £2,000', 'expenses £900', 'surplus £1,100' - never list bare numbers without labels. Always write the risk level in CAPITALS e.g. RED, YELLOW, GREEN. Sentence 1: state the risk level in CAPITALS and key labeled figures including savings if provided. Sentence 2: one warm practical tip mentioning how many months to save based on the surplus. No specific financial products.";
   $result = callGroq($system, "Context: {$context}\nRisk: {$risk_level}. Two sentences only.", 'llama-3.3-70b-versatile', 100, []);
   if ($risk_level === 'green')  return $result ?? "You are in a strong position to afford this. Keep building that surplus.";
   if ($risk_level === 'yellow') return $result ?? "This is achievable but will take some time. Stay consistent with your monthly saving.";

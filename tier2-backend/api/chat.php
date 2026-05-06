@@ -157,7 +157,7 @@ if ($is_correction && in_array($state['step'], ['income','expenses','savings']))
     $surplus = $state['income'] - $num;
     respond($db,$session_id,$state,'No worries - expenses corrected to £'.number_format($num,2).'. Surplus: £'.number_format($surplus,2).'. How much do you currently have saved?',null,['£0','£500','£1000','Other']);
   }
-  if ($correction_field === 'savings' && $num !== null && $num >= 0) {
+  if ($correction_field === 'savings' && $num !== null && $num >= 0 && isset($state['savings'])) {
     $state['savings'] = $num;
     $state['step']    = 'active';
     respond($db,$session_id,$state,'No worries - savings corrected to £'.number_format($num,2).'. What would you like to check?',null,['A laptop £800','A phone £600','A car £10k','Other']);

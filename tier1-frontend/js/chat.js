@@ -76,6 +76,14 @@ async function loadSessions() {
         item.appendChild(title);
         item.appendChild(menu);
         item.addEventListener('click', () => loadSessionMessages(session.id, item));
+        item.setAttribute('tabindex', '0');
+        item.setAttribute('role', 'listitem');
+        item.addEventListener('keydown', function(e) {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            loadSessionMessages(session.id, item);
+          }
+        });
         sessionList.appendChild(item);
       });
     }
@@ -486,6 +494,13 @@ async function handleLogout() {
     window.location.href = 'login.html';
   }
 }
+
+// Keyboard navigation - Escape closes dropdowns
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    document.querySelectorAll('.session-dropdown').forEach(function(d) { d.remove(); });
+  }
+});
 
 sendBtn.addEventListener('click', sendMessage);
 

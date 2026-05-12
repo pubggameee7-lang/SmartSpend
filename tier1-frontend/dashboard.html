@@ -109,8 +109,9 @@
   </style>
 </head>
 <body class="dashboard-page">
+  <a href="#dashboard-main" class="skip-link">Skip to main content</a>
 
-  <header class="header">
+  <header class="header" role="banner">
     <div class="header-left">
       <h1 class="logo">Smart<span>Spend</span></h1>
       <p class="disclaimer">Not a financial advisor - for educational purposes only.</p>
@@ -118,11 +119,11 @@
     <div class="header-right">
       <span id="user-email" class="user-email"></span>
       <a href="index.html" class="btn-secondary">Back to Chat</a>
-      <button id="logout-btn" class="btn-outline">Log Out</button>
+      <button id="logout-btn" class="btn-outline" aria-label="Log out of SmartSpend">Log Out</button>
     </div>
   </header>
 
-  <div class="dashboard-layout">
+  <div class="dashboard-layout" id="dashboard-main" role="main">
 
     <!-- Spending Personality -->
     <div id="personality-card" class="personality-card" style="display:none">
@@ -196,7 +197,7 @@
 
   </div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="js/jspdf.umd.min.js"></script>
   <script src="js/dashboard.js"></script>
 </body>
 </html>

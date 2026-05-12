@@ -145,19 +145,27 @@ $is_unrelated          = $ix['is_unrelated'] ?? false;
 // ── STEP 3: CORRECTION HANDLER ─────────────────────────────
 // Only fires when user explicitly corrects a previously stated value.
 // PHP applies the correction using its own parsed number.
-if ($is_correction && in_array($state['step'], ['income','expenses','savings'])) {
-  if ($correction_field === 'income' && $num !== null && $num > 0) {
+// Only run corrections if the field being corrected was already collected
+$correction_applicable = false;
+if ($is_correction) {
+  if ($correction_field === 'income'   && !empty($state['income']))   $correction_applicable = true;
+  if ($correction_field === 'expenses' && !empty($state['expenses'])) $correction_applicable = true;
+  if ($correction_field === 'savings'  && $state['savings'] !== null) $correction_applicable = true;
+  if (!$correction_field) $correction_applicable = true; // field-less correction handled below
+}
+if ($correction_applicable && in_array($state['step'], ['income','expenses','savings','active'])) {
+  if ($correction_field === 'income' && $num !== null && $num > 0 && !empty($state['income'])) {
     $state['income'] = $num;
     $state['step']   = 'expenses';
     respond($db,$session_id,$state,'No worries - income corrected to £'.number_format($num,2).'. What are your total monthly expenses?',null,['£500','£800','£1200','£1500','Other']);
   }
-  if ($correction_field === 'expenses' && $num !== null && $num >= 0) {
+  if ($correction_field === 'expenses' && $num !== null && $num >= 0 && !empty($state['expenses'])) {
     $state['expenses'] = $num;
     $state['step']     = 'savings';
     $surplus = $state['income'] - $num;
     respond($db,$session_id,$state,'No worries - expenses corrected to £'.number_format($num,2).'. Surplus: £'.number_format($surplus,2).'. How much do you currently have saved?',null,['£0','£500','£1000','Other']);
   }
-  if ($correction_field === 'savings' && $num !== null && $num >= 0 && isset($state['savings'])) {
+  if ($correction_field === 'savings' && $num !== null && $num >= 0 && $state['savings'] !== null) {
     $state['savings'] = $num;
     $state['step']    = 'active';
     respond($db,$session_id,$state,'No worries - savings corrected to £'.number_format($num,2).'. What would you like to check?',null,['A laptop £800','A phone £600','A car £10k','Other']);
@@ -197,8 +205,13 @@ if ($state['step'] === 'greeting') {
     $state['active_goal'] = ['name' => trim($item_name), 'cost' => $item_cost, 'type' => $item_type];
     $cost_str = $item_cost ? ' at £'.number_format($item_cost,2) : '';
     if ($has_memory) {
-      $bot_reply = "Welcome back! I still have your figures - income £".number_format($state['income'],2).", expenses £".number_format($state['expenses'],2).", savings £".number_format($state['savings'],2).". Let me check ".trim($item_name).$cost_str." for you.";
-      $state['step'] = 'active';
+      if ($item_cost) {
+        $bot_reply = "Welcome back! I still have your figures - income £".number_format($state['income'],2).", expenses £".number_format($state['expenses'],2).", savings £".number_format($state['savings'],2).". Let me check ".trim($item_name).$cost_str." for you.";
+        $state['step'] = 'active';
+      } else {
+        $bot_reply = "Welcome back! I still have your figures - income £".number_format($state['income'],2).", expenses £".number_format($state['expenses'],2).", savings £".number_format($state['savings'],2).". How much does the ".trim($item_name)." cost?";
+        $state['step'] = 'active';
+      }
     } else {
       $bot_reply = "Great - {$item_name}{$cost_str} is a solid goal. To check if that is achievable I need a few numbers first. What is your monthly income after tax?";
     }
@@ -470,6 +483,22 @@ if (!empty($state['income']) && !empty($state['expenses']) && isset($state['savi
     $new_name = $goal_name_hint;
     $new_cost = $num;
     $new_type = $goal_type_hint ?? 'one-time';
+  }
+  // Item mentioned but NO price - ask for price directly instead of letting LLM chat
+  elseif (!$loan_mentioned && !$expense_change && !$is_extra_saving && !$refs_prev_goal && !$num) {
+    // Try goal_name_hint first, fall back to parsing message directly
+    $parsed_name = $goal_name_hint;
+    if (!$parsed_name) {
+      // Extract item from "can I afford a X" / "afford X" patterns
+      if (preg_match('/(?:afford|buy|get|purchase|check)\s+(?:a\s+|an\s+)?([a-z][a-z\s]{1,30}?)(?:\s*\?|$)/i', $message, $m)) {
+        $parsed_name = trim($m[1]);
+      }
+    }
+    if ($parsed_name && strlen($parsed_name) > 1) {
+      $state['active_goal'] = ['name' => $parsed_name, 'cost' => null, 'type' => $goal_type_hint ?? 'one-time'];
+      $bot_reply = 'Sure - how much does the ' . $parsed_name . ' cost?';
+      respond($db,$session_id,$state,$bot_reply,null,['Other']);
+    }
   }
   // Affordability check on existing or newly mentioned item
   elseif (in_array('affordability_check',$intents) && !$refs_prev_goal && !$loan_mentioned && !$expense_change && !$is_extra_saving && $num && $num > 50) {

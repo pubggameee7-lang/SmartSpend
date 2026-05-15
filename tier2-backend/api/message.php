@@ -251,14 +251,17 @@ if ($state['step'] === 'savings') {
 // If memory just loaded, confirm figures before doing anything
 if (!empty($state['needs_memory_confirm'])) {
   $state['needs_memory_confirm'] = false;
-  // Try to extract item from current message
-  $item_from_msg = $goal_name_hint ?? parseItemName($message);
-  if ($item_from_msg && strlen(trim($item_from_msg)) > 1) {
-    $state['active_goal'] = ['name' => trim($item_from_msg), 'cost' => null, 'type' => $goal_type_hint ?? 'one-time'];
-  }
-  $item_hint = !empty($state['active_goal']['name']) ? ' How much does the '.$state['active_goal']['name'].' cost?' : ' What would you like to check today?';
-  $bot_reply = "Welcome back! I have your previous figures - income £".number_format($state['income'],2).", expenses £".number_format($state['expenses'],2).", savings £".number_format($state['savings'],2).". Are these still correct?".$item_hint;
+  $bot_reply = "Welcome back! I have your previous figures - income £".number_format($state['income'],2).", expenses £".number_format($state['expenses'],2).", savings £".number_format($state['savings'],2).". Are these still correct, or would you like to update them?";
   respond($db,$session_id,$state,$bot_reply,null,['Yes, correct','No, update them','Other']);
+}
+
+// User wants to update all figures - soft reset to income step
+if (preg_match('/^(no|update|change|different|wrong|no update|no, update|reset|everything|all|start fresh|new figures)/i', $lower) && $state['step'] === 'active' && !empty($state['income'])) {
+  $state['income']   = null;
+  $state['expenses'] = null;
+  $state['savings']  = null;
+  $state['step']     = 'income';
+  respond($db,$session_id,$state,"No problem - let's update your figures. What is your monthly income after tax?",null,['£1500','£2000','£2500','£3000','Other']);
 }
 
 $system_results = [];

@@ -1,6 +1,10 @@
 <?php
 
-
+<?php
+ini_set('session.cookie_path', '/');
+ini_set('session.cookie_samesite', 'Lax');
+    
+    
 require_once '../config/db.php';
 require_once 'calculate.php';
 require_once 'ai.php';
@@ -81,7 +85,7 @@ $history = array_values(array_filter($history_raw, function($m) use ($raw_messag
   return true;
 }));
 
-// ── Output helper ──────────────────────────────────────────
+//  Output helper 
 function respond(PDO $db, int $sid, array $state, string $reply, ?array $calc, array $qr): void {
   $stmt = $db->prepare('INSERT INTO conversation_state (session_id, state) VALUES (?, ?) ON DUPLICATE KEY UPDATE state=VALUES(state), updated_at=NOW()');
   $stmt->execute([$sid, json_encode($state)]);
@@ -91,7 +95,7 @@ function respond(PDO $db, int $sid, array $state, string $reply, ?array $calc, a
   exit;
 }
 
-// ── Run and store a full affordability calculation ─────────
+//  Run and store a full affordability calculation 
 function runCalc(PDO $db, int $sid, int $uid, array &$state, string $name, float $cost, string $type, array $history): array {
   $calc = calculate($state['income'], $state['expenses'], $state['savings'], $cost, $type);
 
@@ -113,9 +117,9 @@ function runCalc(PDO $db, int $sid, int $uid, array &$state, string $name, float
   ];
 }
 
-// ═══════════════════════════════════════════════════════════
+
 // CONTROL LOOP START
-// ═══════════════════════════════════════════════════════════
+
 
 // Hard reset
 if (preg_match('/^(reset|start over|restart)$/i', $lower)) {
@@ -123,12 +127,12 @@ if (preg_match('/^(reset|start over|restart)$/i', $lower)) {
   respond($db,$session_id,$state,"No problem - let's start fresh. What is your monthly income after tax?",null,['£1500','£2000','£2500','£3000','Other']);
 }
 
-// ── STEP 1: PHP parses all numbers ─────────────────────────
+// ─ STEP 1: PHP parses all numbers 
 $num      = parseNumber($message);        // primary number
 $interest = parseInterestRate($message);  // e.g. 6.5%
 $term     = parseLoanTerm($message);      // e.g. 3 years = 36 months
 
-// ── STEP 2: Intent classification (LLM, no math) ───────────
+// ─STEP 2: Intent classification (LLM, no math) 
 $ix                    = extractIntent($message, $state, $history);
 $intents               = $ix['intent'] ?? [];
 $is_correction         = $ix['is_correction'] ?? false;
@@ -145,7 +149,7 @@ $is_question_only      = $ix['is_question_only'] ?? false;
 $is_emotional          = $ix['is_emotional'] ?? false;
 $is_unrelated          = $ix['is_unrelated'] ?? false;
 
-// ── STEP 3: CORRECTION HANDLER ─────────────────────────────
+//  STEP 3: CORRECTION HANDLER 
 // Only fires when user explicitly corrects a previously stated value.
 // PHP applies the correction using its own parsed number.
 // Only run corrections if the field being corrected was already collected
@@ -182,9 +186,9 @@ if ($correction_applicable && in_array($state['step'], ['income','expenses','sav
   respond($db,$session_id,$state,$bot,null,['Other']);
 }
 
-// ═══════════════════════════════════════════════════════════
+
 // STRUCTURED COLLECTION STEPS (PHP controlled, not LLM)
-// ═══════════════════════════════════════════════════════════
+
 
 // GREETING — read first message, extract item, start income collection
 if ($state['step'] === 'greeting') {
@@ -280,18 +284,18 @@ if ($state['step'] === 'savings') {
   respond($db,$session_id,$state,generateReply($message,$state,$history),null,['£0','£500','£1000','Other']);
 }
 
-// ═══════════════════════════════════════════════════════════
+
 // ACTIVE PHASE — all budget data collected
 // PHP runs every financial operation.
 // LLM only generates conversation at the end.
-// ═══════════════════════════════════════════════════════════
+
 
 $system_results = [];
 $calculation    = null;
 $quick_replies  = ['Check another item','Run a stress test','Reset budget','Other'];
 $action_taken   = false; // prevents multiple conflicting actions
 
-// ── INCOME UPDATE (promotion/raise) ────────────────────────
+//  INCOME UPDATE (promotion/raise)
 // Only fires when user explicitly mentions a raise or income change
 if ($income_change && $num && $num > 0 && !$action_taken) {
   // Percentage increase?
@@ -316,7 +320,7 @@ if ($income_change && $num && $num > 0 && !$action_taken) {
   }
 }
 
-// ── EXTRA SAVING RATE ──────────────────────────────────────
+//  EXTRA SAVING RATE
 // Detect "I can save an extra X per month" BEFORE expense/affordability checks
 // This prevents £200 being treated as an item cost or expense reduction
 $is_extra_saving = preg_match('/save.{0,15}extra|extra.{0,15}save|save.{0,10}more|put.{0,10}more.{0,10}aside|save.{0,10}additional|additional.{0,10}saving/i', $message)
@@ -339,7 +343,7 @@ if ($is_extra_saving && !$action_taken) {
   $action_taken = true;
 }
 
-// ── EXPENSE CHANGE ─────────────────────────────────────────
+// EXPENSE CHANGE 
 // Only fires when user explicitly says they will reduce/change expenses
 // Guards: must be expense_change_mentioned, must have income, must be < income, must not be loan
 if ($expense_change && !$is_extra_saving && $num !== null && $num >= 0 && $num < ($state['income'] ?? PHP_INT_MAX) && !$loan_mentioned && !$action_taken) {
@@ -360,7 +364,7 @@ if ($expense_change && !$is_extra_saving && $num !== null && $num >= 0 && $num <
   $action_taken = true;
 }
 
-// ── SUBSCRIPTION ────────────────────────────────────────────
+//  SUBSCRIPTION 
 // Only fires when subscription is explicitly mentioned with a cost
 if ($sub_mentioned && $num && $num > 0 && !$action_taken) {
   $monthly_cost = preg_match('/per week|weekly/i', $message) ? round($num * 4.33, 2) : $num;
@@ -371,7 +375,7 @@ if ($sub_mentioned && $num && $num > 0 && !$action_taken) {
   $system_results['new_surplus']        = '£'.number_format($new_surplus,2).'/month';
 }
 
-// ── LOAN ENGINE ─────────────────────────────────────────────
+// LOAN ENGINE 
 // PHP owns loan calculation entirely. LLM never computes a loan figure.
 // State is locked once calculated - only explicit correction_field updates it.
 if ($loan_mentioned && !$action_taken) {
@@ -426,7 +430,7 @@ if ($loan_mentioned && !$action_taken) {
   }
 }
 
-// ── CUSTOM SAVING RATE ──────────────────────────────────────
+//  CUSTOM SAVING RATE 
 // User states how much they can save per month - PHP calculates timeline
 // Skip if extra_saving already handled this message
 if ((in_array('custom_savings_calc',$intents) || in_array('saving_time',$intents)) && !$action_taken && !$is_extra_saving) {
@@ -455,7 +459,7 @@ if ((in_array('custom_savings_calc',$intents) || in_array('saving_time',$intents
   }
 }
 
-// ── STRESS TEST ─────────────────────────────────────────────
+// STRESS TEST 
 if (in_array('stress_test',$intents) && !empty($state['income']) && !empty($state['expenses']) && !$action_taken) {
   $pct        = null;
   $total_loss = (bool)preg_match('/total|100|all|no income|zero/i', $message);
@@ -472,7 +476,7 @@ if (in_array('stress_test',$intents) && !empty($state['income']) && !empty($stat
   }
 }
 
-// ── AFFORDABILITY CHECK ─────────────────────────────────────
+//  AFFORDABILITY CHECK 
 // Runs when a new item with a cost is introduced OR affordability_check intent fires
 // Strict guards prevent this from running on expense updates, loan discussions, etc.
 if (!empty($state['income']) && !empty($state['expenses']) && isset($state['savings']) && !$action_taken) {
@@ -531,7 +535,7 @@ if (!empty($state['income']) && !empty($state['expenses']) && isset($state['savi
   }
 }
 
-// ── COMPARISON ──────────────────────────────────────────────
+//  COMPARISON 
 if (in_array('comparison',$intents) && count($state['checks']) >= 2 && !$action_taken) {
   $last = $state['checks'][count($state['checks'])-1];
   $prev = $state['checks'][count($state['checks'])-2];
@@ -545,7 +549,7 @@ if (in_array('comparison',$intents) && count($state['checks']) >= 2 && !$action_
     $last['item_name'].' £'.number_format($last['item_price'],2).': '.$last['risk_level'].' risk, '.$fmt($last['calc']['months_to_save']).' to save';
 }
 
-// ── GENERATE CONVERSATION REPLY ─────────────────────────────
+// GENERATE CONVERSATION REPLY 
 // LLM receives full verified state + all system results.
 // LLM outputs natural language only. No math. No numbers it was not given.
 $bot_reply = generateReply($message, $state, $history, $system_results);
@@ -582,7 +586,7 @@ if (!empty($system_results['stress_test']) && strpos(strtolower($bot_reply),'str
   $bot_reply .= "\n\n".$system_results['stress_test'].'.';
 }
 
-// ── QUICK REPLIES ───────────────────────────────────────────
+//  QUICK REPLIES 
 // Only show number buttons when a specific budget field is missing
 $missing = getMissingBudgetField($state);
 if (!$calculation && $missing) {

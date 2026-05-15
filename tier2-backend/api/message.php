@@ -132,14 +132,16 @@ $is_question_only      = $ix['is_question_only'] ?? false;
 $is_emotional          = $ix['is_emotional'] ?? false;
 $is_unrelated          = $ix['is_unrelated'] ?? false;
 
+// Corrections ONLY fire in active step - during data collection steps
+// PHP just processes the number directly regardless of correction intent
 $correction_applicable = false;
-if ($is_correction) {
+if ($is_correction && $state['step'] === 'active') {
   if ($correction_field === 'income'   && !empty($state['income']))   $correction_applicable = true;
   if ($correction_field === 'expenses' && !empty($state['expenses'])) $correction_applicable = true;
   if ($correction_field === 'savings'  && $state['savings'] !== null) $correction_applicable = true;
   if (!$correction_field) $correction_applicable = true;
 }
-if ($correction_applicable && in_array($state['step'], ['income','expenses','savings','active'])) {
+if ($correction_applicable) {
   if ($correction_field === 'income' && $num !== null && $num > 0 && !empty($state['income'])) {
     $state['income'] = $num;
     $state['step']   = 'expenses';
@@ -270,7 +272,7 @@ if ($income_change && $num && $num > 0 && !$action_taken) {
   }
 }
 
-$is_extra_saving = preg_match('/save.{0,15}extra|extra.{0,15}save|save.{0,10}more|put.{0,10}more.{0,10}aside|save.{0,10}additional|additional.{0,10}saving/i', $message)
+$is_extra_saving = preg_match('/save.{0,15}extra|extra.{0,15}save|save.{0,10}more|put.{0,10}more.{0,10}aside|save.{0,10}additional|additional.{0,10}saving|extra.{0,10}per month|pay.{0,10}extra|extra.{0,10}month|afford.{0,10}extra|contribute.{0,10}extra/i', $message)
   && $num && $num > 0
   && !empty($state['active_goal']['cost'])
   && $num < ($state['active_goal']['cost'] ?? PHP_INT_MAX)
@@ -313,6 +315,11 @@ if ($sub_mentioned && $num && $num > 0 && !$action_taken) {
   $system_results['subscription_added'] = '£'.number_format($monthly_cost,2).'/month added';
   $system_results['new_expenses']       = '£'.number_format($state['expenses'],2).'/month';
   $system_results['new_surplus']        = '£'.number_format($new_surplus,2).'/month';
+}
+
+// Also detect loan from message directly in case LLM missed it
+if (!$loan_mentioned && preg_match('/\bloan\b|\bborrow\b|\bfinance\b|\bmortgage\b|\brepayment\b|\bcredit\b/i', $message)) {
+  $loan_mentioned = true;
 }
 
 if ($loan_mentioned && !$action_taken) {

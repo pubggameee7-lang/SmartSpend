@@ -1,4 +1,7 @@
 <?php
+ini_set('session.cookie_path', '/');
+ini_set('session.cookie_samesite', 'Lax');
+
 require_once '../config/db.php';
 
 header('Content-Type: application/json');
@@ -56,7 +59,6 @@ if ($method === 'GET') {
     exit;
   }
 
-  // Enhanced - now includes score history array and expense_ratio for personality label
   if ($action === 'health_score') {
     $stmt = $db->prepare('SELECT score, trend, created_at FROM health_scores WHERE user_id = ? ORDER BY created_at DESC LIMIT 1');
     $stmt->execute([$user_id]);
@@ -113,7 +115,6 @@ if ($method === 'GET') {
     exit;
   }
 
-  // NEW: All assessments across all sessions for this user
   if ($action === 'all_assessments') {
     $stmt = $db->prepare('
       SELECT a.item_name, a.item_price, a.item_type, a.risk_level,
@@ -142,7 +143,6 @@ if ($method === 'GET') {
     exit;
   }
 
-  // NEW: Latest budget for goal progress bars
   if ($action === 'last_budget') {
     $stmt = $db->prepare('
       SELECT b.income, b.expenses, b.savings

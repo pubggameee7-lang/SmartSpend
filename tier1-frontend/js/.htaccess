@@ -1,0 +1,10 @@
+Options -Indexes
+Order Allow,Deny
+Allow from all
+
+<FilesMatch "\.js$">
+  Order Allow,Deny
+  Allow from all
+</FilesMatch>
+
+AddType application/javascript .js

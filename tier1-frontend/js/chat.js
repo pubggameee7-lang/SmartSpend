@@ -459,7 +459,7 @@ async function sendMessage() {
     formData.append('message',    text);
     formData.append('session_id', currentSessionId);
 
-    var res  = await fetch(API_BASE + '/chat.php', { method: 'POST', body: formData });
+    var res  = await fetch(API_BASE + '/message.php', { method: 'POST', body: formData });
     var data = await res.json();
 
     removeTyping();

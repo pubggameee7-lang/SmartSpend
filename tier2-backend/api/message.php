@@ -59,6 +59,7 @@ if (empty($state['income']) || empty($state['expenses']) || !isset($state['savin
     if (!isset($state['savings'])  && $saved['saved_savings'] !== null) $state['savings']  = floatval($saved['saved_savings']);
     if (!empty($state['income']) && !empty($state['expenses']) && isset($state['savings']) && $state['step'] === 'greeting') {
       $state['step'] = 'active';
+      $state['needs_memory_confirm'] = true;
     }
   }
 }
@@ -181,10 +182,10 @@ if ($state['step'] === 'greeting') {
     $cost_str = $item_cost ? ' at £'.number_format($item_cost,2) : '';
     if ($has_memory) {
       if ($item_cost) {
-        $bot_reply = "Welcome back! I still have your figures - income £".number_format($state['income'],2).", expenses £".number_format($state['expenses'],2).", savings £".number_format($state['savings'],2).". Let me check ".trim($item_name).$cost_str." for you.";
+        $bot_reply = "Welcome back! I have your previous figures - income £".number_format($state['income'],2).", expenses £".number_format($state['expenses'],2).", savings £".number_format($state['savings'],2).". Are these still correct for this check?";
         $state['step'] = 'active';
       } else {
-        $bot_reply = "Welcome back! I still have your figures - income £".number_format($state['income'],2).", expenses £".number_format($state['expenses'],2).", savings £".number_format($state['savings'],2).". How much does the ".trim($item_name)." cost?";
+        $bot_reply = "Welcome back! I have your previous figures - income £".number_format($state['income'],2).", expenses £".number_format($state['expenses'],2).", savings £".number_format($state['savings'],2).". Are these still correct? And how much does the ".trim($item_name)." cost?";
         $state['step'] = 'active';
       }
     } else {
@@ -192,7 +193,7 @@ if ($state['step'] === 'greeting') {
     }
   } else {
     if ($has_memory) {
-      $bot_reply = "Welcome back! I still have your budget saved - income £".number_format($state['income'],2).", expenses £".number_format($state['expenses'],2).", savings £".number_format($state['savings'],2).". What would you like to check today?";
+      $bot_reply = "Welcome back! I have your previous figures - income £".number_format($state['income'],2).", expenses £".number_format($state['expenses'],2).", savings £".number_format($state['savings'],2).". Are these still correct, or would you like to update them?";
       $state['step'] = 'active';
     } else {
       $bot_reply = "Hello! I am SmartSpend, your personal money coach. I can help you work out if you can afford something, plan your savings, and give you honest budget guidance.\n\nTo get started - what is your monthly income after tax?";
@@ -245,6 +246,19 @@ if ($state['step'] === 'savings') {
     respond($db,$session_id,$state,$bot,null,['A laptop £800','A phone £600','A car £10k','A subscription','Other']);
   }
   respond($db,$session_id,$state,generateReply($message,$state,$history),null,['£0','£500','£1000','Other']);
+}
+
+// If memory just loaded, confirm figures before doing anything
+if (!empty($state['needs_memory_confirm'])) {
+  $state['needs_memory_confirm'] = false;
+  // Try to extract item from current message
+  $item_from_msg = $goal_name_hint ?? parseItemName($message);
+  if ($item_from_msg && strlen(trim($item_from_msg)) > 1) {
+    $state['active_goal'] = ['name' => trim($item_from_msg), 'cost' => null, 'type' => $goal_type_hint ?? 'one-time'];
+  }
+  $item_hint = !empty($state['active_goal']['name']) ? ' How much does the '.$state['active_goal']['name'].' cost?' : ' What would you like to check today?';
+  $bot_reply = "Welcome back! I have your previous figures - income £".number_format($state['income'],2).", expenses £".number_format($state['expenses'],2).", savings £".number_format($state['savings'],2).". Are these still correct?".$item_hint;
+  respond($db,$session_id,$state,$bot_reply,null,['Yes, correct','No, update them','Other']);
 }
 
 $system_results = [];

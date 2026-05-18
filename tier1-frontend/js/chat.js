@@ -113,6 +113,8 @@ async function loadSessions() {
         folderMenu.textContent = '\u22EF';
         folderMenu.addEventListener('click', function(e) {
           e.stopPropagation();
+          var existing = document.querySelector('.session-dropdown');
+          if (existing) { existing.remove(); return; }
           showProjectMenu(project.id, project.name, folderMenu);
         });
 
@@ -220,6 +222,8 @@ function buildSessionItem(session, projectId) {
   menu.textContent = '\u22EF';
   menu.addEventListener('click', function(e) {
     e.stopPropagation();
+    var existing = document.querySelector('.session-dropdown');
+    if (existing) { existing.remove(); return; }
     showSessionMenu(session.id, session.title, item, session.pinned, projectId);
   });
 
@@ -243,16 +247,34 @@ function showProjectMenu(projectId, projectName, el) {
   renameBtn.textContent = 'Rename folder';
   renameBtn.addEventListener('click', async function(e) {
     e.stopPropagation();
-    var name = prompt('New folder name:', projectName);
-    if (name && name.trim()) {
-      var formData = new FormData();
-      formData.append('action', 'rename_project');
-      formData.append('project_id', projectId);
-      formData.append('name', name.trim());
-      await fetch(`${API_BASE}/history.php`, { method: 'POST', body: formData });
-      await loadSessions();
-    }
     dropdown.remove();
+    // Find folder name span and make it editable
+    var nameSpan = el.parentNode.querySelector('.project-name');
+    if (!nameSpan) return;
+    var input = document.createElement('input');
+    input.value = projectName;
+    input.style.cssText = 'flex:1;border:1.5px solid var(--primary);border-radius:4px;padding:2px 6px;font-family:Poppins,sans-serif;font-size:13px;color:var(--text);outline:none;width:100%;';
+    nameSpan.replaceWith(input);
+    input.focus();
+    input.select();
+    async function saveRename() {
+      var newName = input.value.trim();
+      if (newName && newName !== projectName) {
+        var formData = new FormData();
+        formData.append('action', 'rename_project');
+        formData.append('project_id', projectId);
+        formData.append('name', newName);
+        await fetch(API_BASE + '/history.php', { method: 'POST', body: formData });
+        await loadSessions();
+      } else {
+        input.replaceWith(nameSpan);
+      }
+    }
+    input.addEventListener('blur', saveRename);
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+      if (e.key === 'Escape') { input.replaceWith(nameSpan); }
+    });
   });
 
   var deleteBtn = document.createElement('button');
@@ -274,7 +296,7 @@ function showProjectMenu(projectId, projectName, el) {
   dropdown.appendChild(deleteBtn);
   document.body.appendChild(dropdown);
   var rect = el.getBoundingClientRect();
-  dropdown.style.cssText = 'position:fixed;top:' + rect.bottom + 'px;left:' + rect.left + 'px;z-index:300;min-width:140px;max-width:180px;background:var(--white);border:1.5px solid var(--border);border-radius:var(--radius-sm);box-shadow:var(--shadow-md);overflow:hidden;';
+  dropdown.style.cssText = 'position:fixed;top:' + rect.bottom + 'px;left:' + rect.left + 'px;z-index:300;min-width:130px;max-width:155px;background:var(--white);border:1.5px solid var(--border);border-radius:var(--radius-sm);box-shadow:var(--shadow-md);overflow:hidden;';
   setTimeout(function() {
     document.addEventListener('click', function() { dropdown.remove(); }, { once: true });
   }, 0);
@@ -288,18 +310,37 @@ function showSessionMenu(sessionId, currentTitle, el, currentPinned, currentProj
 
   const renameBtn = document.createElement('button');
   renameBtn.textContent = 'Rename';
-  renameBtn.addEventListener('click', async (e) => {
+  renameBtn.addEventListener('click', async function(e) {
     e.stopPropagation();
-    const newTitle = prompt('Enter new session name:', currentTitle);
-    if (newTitle && newTitle.trim()) {
-      const formData = new FormData();
-      formData.append('action',     'rename_session');
-      formData.append('session_id', sessionId);
-      formData.append('title',      newTitle.trim());
-      await fetch(`${API_BASE}/history.php`, { method: 'POST', body: formData });
-      await loadSessions();
-    }
     dropdown.remove();
+    // Find the title span in the session item and make it editable
+    var titleSpan = el.querySelector('span');
+    if (!titleSpan) return;
+    var oldText = titleSpan.textContent;
+    var input = document.createElement('input');
+    input.value = currentTitle;
+    input.style.cssText = 'flex:1;border:1.5px solid var(--primary);border-radius:4px;padding:2px 6px;font-family:Poppins,sans-serif;font-size:13px;color:var(--text);outline:none;width:100%;';
+    titleSpan.replaceWith(input);
+    input.focus();
+    input.select();
+    async function saveRename() {
+      var newTitle = input.value.trim();
+      if (newTitle && newTitle !== currentTitle) {
+        var formData = new FormData();
+        formData.append('action', 'rename_session');
+        formData.append('session_id', sessionId);
+        formData.append('title', newTitle);
+        await fetch(API_BASE + '/history.php', { method: 'POST', body: formData });
+        await loadSessions();
+      } else {
+        input.replaceWith(titleSpan);
+      }
+    }
+    input.addEventListener('blur', saveRename);
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+      if (e.key === 'Escape') { input.replaceWith(titleSpan); }
+    });
   });
 
   const deleteBtn = document.createElement('button');
@@ -474,10 +515,17 @@ function showSessionMenu(sessionId, currentTitle, el, currentPinned, currentProj
   dropdown.appendChild(exportBtn);
   dropdown.appendChild(archiveBtn);
   dropdown.appendChild(deleteBtn);
-  el.appendChild(dropdown);
 
-  setTimeout(() => {
-    document.addEventListener('click', () => dropdown.remove(), { once: true });
+  document.body.appendChild(dropdown);
+  var rect = el.getBoundingClientRect();
+  var dropH = dropdown.offsetHeight || 220;
+  var topPos = rect.top;
+  if (topPos + dropH > window.innerHeight - 8) topPos = rect.bottom - dropH;
+  if (topPos < 8) topPos = 8;
+  dropdown.style.cssText = 'position:fixed;top:' + topPos + 'px;left:' + (rect.right + 4) + 'px;z-index:300;min-width:150px;max-width:180px;background:var(--white);border:1.5px solid var(--border);border-radius:var(--radius-sm);box-shadow:var(--shadow-md);overflow:hidden;';
+
+  setTimeout(function() {
+    document.addEventListener('click', function() { dropdown.remove(); }, { once: true });
   }, 0);
 }
 

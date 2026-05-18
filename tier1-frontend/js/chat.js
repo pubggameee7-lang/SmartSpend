@@ -897,7 +897,13 @@ userInput.addEventListener('keydown', function(e) {
   }
 });
 
-newSessionBtn.addEventListener('click', createSession);
+newSessionBtn.addEventListener('click', function() {
+  currentSessionId = null;
+  clearChat();
+  clearQuickReplies();
+  showWelcome();
+  document.querySelectorAll('.session-item').forEach(function(i) { i.classList.remove('active'); });
+});
 
 
 

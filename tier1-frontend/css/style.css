@@ -414,8 +414,8 @@ a:hover { text-decoration: underline; }
 
 
 .session-item.pinned {
-  border-color: var(--primary);
-  background: #E0F2F1;
+  border-color: transparent;
+  background: transparent;
 }
 
 

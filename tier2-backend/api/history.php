@@ -154,6 +154,38 @@ if ($method === 'GET') {
     exit;
   }
 
+  if ($action === 'projects') {
+    $stmt = $db->prepare('SELECT id, name FROM projects WHERE user_id = ? ORDER BY created_at ASC');
+    $stmt->execute([$user_id]);
+    $projects = $stmt->fetchAll();
+    $result = [];
+    foreach ($projects as $p) {
+      $stmt2 = $db->prepare('SELECT id, title, pinned FROM sessions WHERE user_id = ? AND project_id = ? AND archived = 0 ORDER BY pinned DESC, created_at DESC');
+      $stmt2->execute([$user_id, $p['id']]);
+      $sessions = $stmt2->fetchAll();
+      $result[] = [
+        'id'       => $p['id'],
+        'name'     => clean($p['name']),
+        'sessions' => array_map(function($s) {
+          return ['id' => $s['id'], 'title' => clean($s['title']), 'pinned' => (bool)$s['pinned']];
+        }, $sessions),
+      ];
+    }
+    echo json_encode(['success' => true, 'projects' => $result]);
+    exit;
+  }
+
+  if ($action === 'archived_sessions') {
+    $stmt = $db->prepare('SELECT id, title, created_at FROM sessions WHERE user_id = ? AND archived = 1 ORDER BY created_at DESC');
+    $stmt->execute([$user_id]);
+    $sessions = $stmt->fetchAll();
+    $clean_sessions = array_map(function($s) {
+      return ['id' => $s['id'], 'title' => clean($s['title']), 'created_at' => $s['created_at']];
+    }, $sessions);
+    echo json_encode(['success' => true, 'sessions' => $clean_sessions]);
+    exit;
+  }
+
   if ($action === 'last_budget') {
     $stmt = $db->prepare('
       SELECT b.income, b.expenses, b.savings
@@ -204,6 +236,55 @@ if ($method === 'POST') {
     $session_id = intval($_POST['session_id'] ?? 0);
     if (!$session_id) { echo json_encode(['success' => false, 'error' => 'Invalid session.']); exit; }
     $stmt = $db->prepare('DELETE FROM sessions WHERE id = ? AND user_id = ?');
+    $stmt->execute([$session_id, $user_id]);
+    echo json_encode(['success' => true]);
+    exit;
+  }
+
+  if ($action === 'create_project') {
+    $name = clean($_POST['name'] ?? '');
+    if (!$name) { echo json_encode(['success' => false, 'error' => 'Name required.']); exit; }
+    $stmt = $db->prepare('INSERT INTO projects (user_id, name) VALUES (?, ?)');
+    $stmt->execute([$user_id, $name]);
+    echo json_encode(['success' => true, 'project_id' => $db->lastInsertId(), 'name' => $name]);
+    exit;
+  }
+
+  if ($action === 'rename_project') {
+    $project_id = intval($_POST['project_id'] ?? 0);
+    $name       = clean($_POST['name'] ?? '');
+    if (!$project_id || !$name) { echo json_encode(['success' => false]); exit; }
+    $stmt = $db->prepare('UPDATE projects SET name = ? WHERE id = ? AND user_id = ?');
+    $stmt->execute([$name, $project_id, $user_id]);
+    echo json_encode(['success' => true]);
+    exit;
+  }
+
+  if ($action === 'delete_project') {
+    $project_id = intval($_POST['project_id'] ?? 0);
+    if (!$project_id) { echo json_encode(['success' => false]); exit; }
+    $stmt = $db->prepare('UPDATE sessions SET project_id = NULL WHERE project_id = ? AND user_id = ?');
+    $stmt->execute([$project_id, $user_id]);
+    $stmt = $db->prepare('DELETE FROM projects WHERE id = ? AND user_id = ?');
+    $stmt->execute([$project_id, $user_id]);
+    echo json_encode(['success' => true]);
+    exit;
+  }
+
+  if ($action === 'assign_project') {
+    $session_id = intval($_POST['session_id'] ?? 0);
+    $project_id = ($_POST['project_id'] === 'null' || $_POST['project_id'] === '') ? null : intval($_POST['project_id']);
+    if (!$session_id) { echo json_encode(['success' => false]); exit; }
+    $stmt = $db->prepare('UPDATE sessions SET project_id = ? WHERE id = ? AND user_id = ?');
+    $stmt->execute([$project_id, $session_id, $user_id]);
+    echo json_encode(['success' => true]);
+    exit;
+  }
+
+  if ($action === 'unarchive_session') {
+    $session_id = intval($_POST['session_id'] ?? 0);
+    if (!$session_id) { echo json_encode(['success' => false]); exit; }
+    $stmt = $db->prepare('UPDATE sessions SET archived = 0 WHERE id = ? AND user_id = ?');
     $stmt->execute([$session_id, $user_id]);
     echo json_encode(['success' => true]);
     exit;

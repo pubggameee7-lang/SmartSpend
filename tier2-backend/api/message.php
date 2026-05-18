@@ -256,7 +256,7 @@ if (!empty($state['needs_memory_confirm'])) {
 }
 
 // User confirms memory figures are correct - proceed to active
-if (preg_match('/^(yes|yep|yeah|correct|they are correct|yes correct|that's correct|thats correct|looks correct|looks good|right|that's right|thats right|same|use these|yes use|confirm)/i', $lower) && $state['step'] === 'active' && !empty($state['income'])) {
+if (preg_match('/^(yes|yep|yeah|correct|they are correct|yes correct|thats correct|looks correct|looks good|right|thats right|same|use these|yes use|confirm)/i', $lower) && $state['step'] === 'active' && !empty($state['income'])) {
   $item_hint = !empty($state['active_goal']['name']) ? 'How much does the '.$state['active_goal']['name'].' cost?' : 'What would you like to check? Tell me the item and the price.';
   respond($db,$session_id,$state,'Great - '.$item_hint,null,['Other']);
 }

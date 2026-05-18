@@ -134,7 +134,32 @@ function showSessionMenu(sessionId, currentTitle, el) {
     dropdown.remove();
   });
 
+  const copyBtn = document.createElement('button');
+  copyBtn.textContent = 'Copy chat';
+  copyBtn.addEventListener('click', async function(e) {
+    e.stopPropagation();
+    dropdown.remove();
+    try {
+      const res  = await fetch(`${API_BASE}/history.php?action=messages&session_id=${sessionId}`);
+      const data = await res.json();
+      if (data.success && data.messages.length > 0) {
+        const text = data.messages.map(function(m) {
+          return (m.role === 'user' ? 'You: ' : 'SmartSpend: ') + m.content;
+        }).join('\n\n');
+        await navigator.clipboard.writeText(text);
+        const toast = document.createElement('div');
+        toast.textContent = 'Chat copied to clipboard';
+        toast.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#2C3E50;color:#fff;padding:8px 18px;border-radius:20px;font-size:13px;font-family:Poppins,sans-serif;z-index:999;opacity:1;transition:opacity 0.4s;pointer-events:none;';
+        document.body.appendChild(toast);
+        setTimeout(function() { toast.style.opacity='0'; setTimeout(function() { toast.remove(); }, 400); }, 2000);
+      }
+    } catch(err) {
+      console.error('Copy failed:', err);
+    }
+  });
+
   dropdown.appendChild(renameBtn);
+  dropdown.appendChild(copyBtn);
   dropdown.appendChild(deleteBtn);
   el.appendChild(dropdown);
 

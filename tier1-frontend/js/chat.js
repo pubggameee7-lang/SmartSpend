@@ -128,38 +128,19 @@ async function loadSessions() {
       });
     }
 
-    // CHATS section
-    var res  = await fetch(`${API_BASE}/history.php?action=sessions`);
-    var data = await res.json();
-
-    var chatsLabel = document.createElement('div');
-    chatsLabel.style.cssText = 'font-size:11px;color:var(--text-muted);padding:8px 4px 2px;font-weight:600;letter-spacing:0.5px;';
-    chatsLabel.textContent = 'CHATS';
-    sessionList.appendChild(chatsLabel);
-
-    if (data.success && data.sessions.length > 0) {
-      var ungrouped = data.sessions.filter(function(s) { return !s.project_id; });
-      ungrouped.forEach(function(session) {
-        sessionList.appendChild(buildSessionItem(session, null));
-      });
-    }
-
-    // ARCHIVED section
-    // Archived section
-    var archSection = document.getElementById('archive-section');
-    archSection.innerHTML = '';
+    // ARCHIVED section - below projects, above chats
     var archRes  = await fetch(`${API_BASE}/history.php?action=archived_sessions`);
     var archData = await archRes.json();
     if (archData.success && archData.sessions.length > 0) {
       var archHeader = document.createElement('div');
-      archHeader.style.cssText = 'font-size:11px;color:var(--text-muted);padding:8px 4px 4px;font-weight:600;letter-spacing:0.5px;cursor:pointer;user-select:none;border-top:1px solid var(--border);margin-top:8px;';
-      archHeader.textContent = '\u25b8 Archived (' + archData.sessions.length + ')';
+      archHeader.style.cssText = 'font-size:11px;color:var(--text-muted);padding:4px 4px 2px;font-weight:600;letter-spacing:0.5px;cursor:pointer;user-select:none;';
+      archHeader.textContent = '\u25b8 Archived';
       var archList = document.createElement('div');
       archList.style.cssText = 'display:none;flex-direction:column;gap:4px;';
       archHeader.addEventListener('click', function() {
         var open = archList.style.display !== 'none';
         archList.style.display = open ? 'none' : 'flex';
-        archHeader.textContent = (open ? '\u25b8' : '\u25be') + ' Archived (' + archData.sessions.length + ')';
+        archHeader.textContent = (open ? '\u25b8' : '\u25be') + ' Archived';
       });
       archData.sessions.forEach(function(session) {
         var item = document.createElement('div');
@@ -184,9 +165,27 @@ async function loadSessions() {
         item.addEventListener('click', function() { loadSessionMessages(session.id, item); });
         archList.appendChild(item);
       });
-      archSection.appendChild(archHeader);
-      archSection.appendChild(archList);
+      sessionList.appendChild(archHeader);
+      sessionList.appendChild(archList);
     }
+
+    // CHATS section
+    var res  = await fetch(`${API_BASE}/history.php?action=sessions`);
+    var data = await res.json();
+
+    var chatsLabel = document.createElement('div');
+    chatsLabel.style.cssText = 'font-size:11px;color:var(--text-muted);padding:8px 4px 2px;font-weight:600;letter-spacing:0.5px;';
+    chatsLabel.textContent = 'CHATS';
+    sessionList.appendChild(chatsLabel);
+
+    if (data.success && data.sessions.length > 0) {
+      var ungrouped = data.sessions.filter(function(s) { return !s.project_id; });
+      ungrouped.forEach(function(session) {
+        sessionList.appendChild(buildSessionItem(session, null));
+      });
+    }
+
+
 
 
 

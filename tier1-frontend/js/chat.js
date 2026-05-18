@@ -58,7 +58,7 @@ async function loadSessions() {
     // PROJECTS section
     // PROJECTS - collapsed header like archive
     var projHeader = document.createElement('div');
-    projHeader.style.cssText = 'font-size:11px;color:var(--text-muted);padding:4px 4px 2px;font-weight:600;letter-spacing:0.5px;cursor:pointer;user-select:none;display:flex;align-items:center;justify-content:space-between;';
+    projHeader.style.cssText = 'font-size:14px;color:#4A5568;padding:4px 4px 2px;font-weight:600;letter-spacing:0.5px;cursor:pointer;user-select:none;display:flex;align-items:center;justify-content:space-between;';
     var projToggleSpan = document.createElement('span');
     projToggleSpan.textContent = '\u25b8 PROJECTS';
     var addProjBtn = document.createElement('button');
@@ -147,7 +147,7 @@ async function loadSessions() {
     var archData = await archRes.json();
     if (archData.success && archData.sessions.length > 0) {
       var archHeader = document.createElement('div');
-      archHeader.style.cssText = 'font-size:11px;color:var(--text-muted);padding:4px 4px 2px;font-weight:600;letter-spacing:0.5px;cursor:pointer;user-select:none;';
+      archHeader.style.cssText = 'font-size:14px;color:#4A5568;padding:4px 4px 2px;font-weight:600;letter-spacing:0.5px;cursor:pointer;user-select:none;';
       archHeader.textContent = '\u25b8 Archived';
       var archList = document.createElement('div');
       archList.style.cssText = 'display:none;flex-direction:column;gap:4px;';
@@ -188,7 +188,7 @@ async function loadSessions() {
     var data = await res.json();
 
    var chatsLabel = document.createElement('div');
-    chatsLabel.style.cssText = 'font-size:11px;color:var(--text-muted);padding:8px 4px 2px;font-weight:600;letter-spacing:0.5px;';
+    chatsLabel.style.cssText = 'font-size:14px;color:#4A5568;padding:8px 4px 2px;font-weight:600;letter-spacing:0.5px;';
     chatsLabel.textContent = 'CHATS';
     sessionList.appendChild(chatsLabel);
 

@@ -158,8 +158,28 @@ function showSessionMenu(sessionId, currentTitle, el) {
     }
   });
 
+  const exportBtn = document.createElement('button');
+  exportBtn.textContent = 'Export as PDF';
+  exportBtn.addEventListener('click', async function(e) {
+    e.stopPropagation();
+    dropdown.remove();
+    try {
+      const res  = await fetch(`${API_BASE}/history.php?action=messages&session_id=${sessionId}`);
+      const data = await res.json();
+      if (data.success && data.messages.length > 0) {
+        const rows = data.messages.map(function(m) {
+          return '<tr style="background:' + (m.role==='user'?'#f8fffe':'#fff') + '"><td style="padding:8px 12px;font-weight:600;color:' + (m.role==='user'?'#00B4A6':'#2C3E50') + ';white-space:nowrap;vertical-align:top">' + (m.role==='user'?'You':'SmartSpend') + '</td><td style="padding:8px 12px;color:#2C3E50">' + m.content.replace(/\n/g,'<br>') + '</td></tr>';
+        }).join('');
+        const win = window.open('', '_blank');
+        win.document.write('<!DOCTYPE html><html><head><title>SmartSpend - ' + currentTitle + '</title><style>body{font-family:Helvetica,sans-serif;margin:0;padding:0;color:#2C3E50}.header{background:#00B4A6;color:#fff;padding:20px 30px}.header h1{margin:0;font-size:22px}.header p{margin:4px 0 0;font-size:12px;opacity:.85}.disclaimer{background:#E0F2F1;color:#00B4A6;font-size:11px;padding:8px 30px}.content{padding:24px 30px}table{width:100%;border-collapse:collapse;font-size:13px}td{border-bottom:1px solid #f0f0f0;vertical-align:top}.footer{margin-top:32px;padding-top:12px;border-top:1px solid #E0F2F1;font-size:10px;color:#7F8C8D}.date{float:right;font-size:11px;opacity:.7}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><div class="header"><span class="date">' + new Date().toLocaleDateString("en-GB") + '</span><h1>SmartSpend</h1><p>' + currentTitle + '</p></div><div class="disclaimer">Not a financial adviser - for educational purposes only.</div><div class="content"><table>' + rows + '</table><div class="footer">SmartSpend - Not a financial adviser. For educational purposes only.</div></div><script>window.onload=function(){window.print();}<\/script></body></html>');
+        win.document.close();
+      }
+    } catch(err) { console.error('Export failed:', err); }
+  });
+
   dropdown.appendChild(renameBtn);
   dropdown.appendChild(copyBtn);
+  dropdown.appendChild(exportBtn);
   dropdown.appendChild(deleteBtn);
   el.appendChild(dropdown);
 

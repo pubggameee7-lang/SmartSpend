@@ -55,27 +55,48 @@ async function loadSessions() {
     const projRes  = await fetch(`${API_BASE}/history.php?action=projects`);
     const projData = await projRes.json();
 
+    // PROJECTS section
+    var projLabel = document.createElement('div');
+    projLabel.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:4px 4px 2px;';
+    var projLabelText = document.createElement('span');
+    projLabelText.style.cssText = 'font-size:11px;color:var(--text-muted);font-weight:600;letter-spacing:0.5px;';
+    projLabelText.textContent = 'PROJECTS';
+    var addProjBtn = document.createElement('button');
+    addProjBtn.textContent = '+ New';
+    addProjBtn.style.cssText = 'font-size:11px;padding:2px 8px;background:transparent;border:1px solid var(--border);border-radius:4px;color:var(--text-muted);cursor:pointer;font-family:Poppins,sans-serif;';
+    addProjBtn.addEventListener('click', async function() {
+      var name = prompt('Project name:');
+      if (name && name.trim()) {
+        var formData = new FormData();
+        formData.append('action', 'create_project');
+        formData.append('name', name.trim());
+        var res = await fetch(`${API_BASE}/history.php`, { method: 'POST', body: formData });
+        var data = await res.json();
+        if (data.success) { await loadSessions(); }
+        else { alert('Failed to create project.'); }
+      }
+    });
+    projLabel.appendChild(projLabelText);
+    projLabel.appendChild(addProjBtn);
+    sessionList.appendChild(projLabel);
+
     if (projData.success && projData.projects.length > 0) {
-      var projLabel = document.createElement('div');
-      projLabel.style.cssText = 'font-size:11px;color:var(--text-muted);padding:4px 4px 2px;font-weight:600;letter-spacing:0.5px;';
-      projLabel.textContent = 'PROJECTS';
-      sessionList.appendChild(projLabel);
       projData.projects.forEach(function(project) {
-        const folder = document.createElement('div');
+        var folder = document.createElement('div');
         folder.className = 'project-folder';
 
-        const folderHeader = document.createElement('div');
+        var folderHeader = document.createElement('div');
         folderHeader.className = 'project-header';
 
-        const toggle = document.createElement('span');
+        var toggle = document.createElement('span');
         toggle.className = 'project-toggle';
         toggle.textContent = '\u25b8';
 
-        const nameSpan = document.createElement('span');
+        var nameSpan = document.createElement('span');
         nameSpan.className = 'project-name';
         nameSpan.textContent = '\uD83D\uDCC1 ' + project.name;
 
-        const folderMenu = document.createElement('div');
+        var folderMenu = document.createElement('div');
         folderMenu.className = 'session-menu';
         folderMenu.textContent = '\u22EF';
         folderMenu.addEventListener('click', function(e) {
@@ -87,7 +108,7 @@ async function loadSessions() {
         folderHeader.appendChild(nameSpan);
         folderHeader.appendChild(folderMenu);
 
-        const folderSessions = document.createElement('div');
+        var folderSessions = document.createElement('div');
         folderSessions.className = 'project-sessions';
         folderSessions.style.display = 'none';
 
@@ -107,25 +128,23 @@ async function loadSessions() {
       });
     }
 
-    // Sessions not in any project
-    const res  = await fetch(`${API_BASE}/history.php?action=sessions`);
-    const data = await res.json();
+    // CHATS section
+    var res  = await fetch(`${API_BASE}/history.php?action=sessions`);
+    var data = await res.json();
+
+    var chatsLabel = document.createElement('div');
+    chatsLabel.style.cssText = 'font-size:11px;color:var(--text-muted);padding:8px 4px 2px;font-weight:600;letter-spacing:0.5px;';
+    chatsLabel.textContent = 'CHATS';
+    sessionList.appendChild(chatsLabel);
 
     if (data.success && data.sessions.length > 0) {
       var ungrouped = data.sessions.filter(function(s) { return !s.project_id; });
-      if (ungrouped.length > 0) {
-        var chatsLabel = document.createElement('div');
-        chatsLabel.style.cssText = 'font-size:11px;color:var(--text-muted);padding:8px 4px 2px;font-weight:600;letter-spacing:0.5px;';
-        chatsLabel.textContent = 'CHATS';
-        sessionList.appendChild(chatsLabel);
-        ungrouped.forEach(function(session) {
-          sessionList.appendChild(buildSessionItem(session, null));
-        });
-      }
+      ungrouped.forEach(function(session) {
+        sessionList.appendChild(buildSessionItem(session, null));
+      });
     }
 
-
-
+    // ARCHIVED section
     // Archived section
     var archSection = document.getElementById('archive-section');
     archSection.innerHTML = '';
@@ -366,7 +385,7 @@ function showSessionMenu(sessionId, currentTitle, el, currentPinned, currentProj
   });
 
   const moveBtn = document.createElement('button');
-  moveBtn.textContent = currentProjectId ? 'Remove from folder' : 'Move to folder';
+  moveBtn.textContent = currentProjectId ? 'Remove from project' : 'Move to project';
   moveBtn.addEventListener('click', async function(e) {
     e.stopPropagation();
     dropdown.remove();
@@ -785,24 +804,7 @@ userInput.addEventListener('keydown', function(e) {
 
 newSessionBtn.addEventListener('click', createSession);
 
-var newProjectBtn = document.getElementById('new-project-btn');
-if (newProjectBtn) {
-  newProjectBtn.addEventListener('click', async function() {
-    var name = prompt('Project name:');
-    if (name && name.trim()) {
-      var formData = new FormData();
-      formData.append('action', 'create_project');
-      formData.append('name', name.trim());
-      var res = await fetch(API_BASE + '/history.php', { method: 'POST', body: formData });
-      var data = await res.json();
-      if (data.success) {
-        await loadSessions();
-      } else {
-        alert('Failed to create project: ' + (data.error || 'Unknown error'));
-      }
-    }
-  });
-}
+
 
 // Search - wire up once on page load
 var searchInput = document.getElementById('session-search');

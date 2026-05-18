@@ -122,7 +122,7 @@ async function loadSessions() {
 
         var folderSessions = document.createElement('div');
         folderSessions.className = 'project-sessions';
-        folderSessions.style.display = 'none';
+        folderSessions.style.cssText = 'display:none;flex-direction:column;gap:2px;padding-left:8px;';
 
         folderHeader.addEventListener('click', function() {
           var isOpen = folderSessions.style.display !== 'none';

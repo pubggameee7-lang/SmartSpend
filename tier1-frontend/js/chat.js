@@ -187,7 +187,7 @@ async function loadSessions() {
     var res  = await fetch(`${API_BASE}/history.php?action=sessions`);
     var data = await res.json();
 
-    var chatsLabel = document.createElement('div');
+   var chatsLabel = document.createElement('div');
     chatsLabel.style.cssText = 'font-size:11px;color:var(--text-muted);padding:8px 4px 2px;font-weight:600;letter-spacing:0.5px;';
     chatsLabel.textContent = 'CHATS';
     sessionList.appendChild(chatsLabel);
@@ -907,7 +907,10 @@ newSessionBtn.addEventListener('click', function() {
 
 
 
-// Search - simple title filter
+
+
+
+// Simple title search in sidebar
 var searchInput = document.getElementById('session-search');
 if (searchInput) {
   searchInput.addEventListener('input', function() {
@@ -919,9 +922,103 @@ if (searchInput) {
       folder.style.display = (!q || folder.textContent.toLowerCase().includes(q)) ? '' : 'none';
     });
   });
+  searchInput.addEventListener('focus', function() {
+    searchInput.blur();
+    openSearchModal();
+  });
 }
 
-if (logoutBtn) {
+// Full text search modal
+var searchModal = document.getElementById('search-modal');
+var searchModalInput = document.getElementById('search-modal-input');
+var searchModalResults = document.getElementById('search-modal-results');
+var searchModalClose = document.getElementById('search-modal-close');
+var modalTimer = null;
+
+function openSearchModal() {
+  if (!searchModal) return;
+  searchModal.style.display = 'flex';
+  if (searchModalInput) { searchModalInput.value = ''; searchModalInput.focus(); }
+  if (searchModalResults) searchModalResults.innerHTML = '';
+}
+
+function closeSearchModal() {
+  if (!searchModal) return;
+  searchModal.style.display = 'none';
+  if (searchModalInput) searchModalInput.value = '';
+  if (searchModalResults) searchModalResults.innerHTML = '';
+}
+
+if (searchModalClose) searchModalClose.addEventListener('click', closeSearchModal);
+if (searchModal) searchModal.addEventListener('click', function(e) { if (e.target === searchModal) closeSearchModal(); });
+
+
+
+document.addEventListener('keydown', function(e) {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); openSearchModal(); }
+  if (e.key === 'Escape') { closeSearchModal(); }
+});
+
+if (searchModalInput) {
+  searchModalInput.addEventListener('input', function() {
+    var q = searchModalInput.value.trim();
+    clearTimeout(modalTimer);
+    if (!searchModalResults) return;
+    searchModalResults.innerHTML = '';
+    if (!q) return;
+    searchModalResults.innerHTML = '<div style="padding:16px;color:var(--text-muted);font-size:13px;text-align:center;">Searching...</div>';
+    modalTimer = setTimeout(async function() {
+      try {
+        var res = await fetch(API_BASE + '/history.php?action=search&q=' + encodeURIComponent(q));
+        var data = await res.json();
+        searchModalResults.innerHTML = '';
+        if (!data.success || !data.results.length) {
+          searchModalResults.innerHTML = '<div style="padding:16px;color:var(--text-muted);font-size:13px;text-align:center;">No results for "' + q + '"</div>';
+          return;
+        }
+        var seen = {};
+        data.results.forEach(function(r) {
+          if (seen[r.session_id]) return;
+          seen[r.session_id] = true;
+          var row = document.createElement('div');
+          row.style.cssText = 'padding:12px 16px;cursor:pointer;border-bottom:1px solid var(--border);';
+          row.onmouseover = function() { row.style.background = 'var(--bg)'; };
+          row.onmouseout  = function() { row.style.background = ''; };
+          var titleEl = document.createElement('div');
+          titleEl.style.cssText = 'font-weight:600;font-size:13px;color:var(--text);margin-bottom:4px;';
+          titleEl.textContent = r.session_title;
+          var snippetEl = document.createElement('div');
+          snippetEl.style.cssText = 'font-size:12px;color:var(--text-muted);line-height:1.5;';
+          var safe = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          var highlighted = r.snippet.replace(new RegExp('(' + safe + ')', 'gi'), '<mark style="background:#E0F2F1;color:var(--primary);border-radius:2px;padding:0 2px;">$1</mark>');
+          snippetEl.innerHTML = highlighted;
+          row.appendChild(titleEl);
+          row.appendChild(snippetEl);
+          row.addEventListener('click', function() {
+            closeSearchModal();
+            var found = false;
+            document.querySelectorAll('.session-item').forEach(function(item) {
+              if (item.dataset.sessionId == r.session_id) { item.click(); found = true; }
+            });
+            if (!found) { currentSessionId = r.session_id; loadSessionMessages(r.session_id, document.createElement('div')); }
+          });
+          searchModalResults.appendChild(row);
+        });
+        var count = document.createElement('div');
+        count.style.cssText = 'padding:8px 16px;font-size:11px;color:var(--text-muted);background:var(--bg);';
+        count.textContent = Object.keys(seen).length + ' chat(s) found';
+        searchModalResults.appendChild(count);
+      } catch(err) {
+        searchModalResults.innerHTML = '<div style="padding:16px;color:var(--text-muted);font-size:13px;">Search failed.</div>';
+      }   
+    }, 400);
+  });
+}
+
+
+
+
+ if (logoutBtn) {
   logoutBtn.addEventListener('click', handleLogout);
 }
 
@@ -942,4 +1039,4 @@ if (logoutBtn) {
       await loadSessionMessages(data.sessions[0].id, firstItem);
     }
   }
-})();
+})(); 

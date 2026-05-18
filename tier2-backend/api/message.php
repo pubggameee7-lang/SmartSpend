@@ -255,8 +255,14 @@ if (!empty($state['needs_memory_confirm'])) {
   respond($db,$session_id,$state,$bot_reply,null,['Yes, correct','No, update them','Other']);
 }
 
+// User confirms memory figures are correct - proceed to active
+if (preg_match('/^(yes|yep|yeah|correct|they are correct|yes correct|that's correct|thats correct|looks correct|looks good|right|that's right|thats right|same|use these|yes use|confirm)/i', $lower) && $state['step'] === 'active' && !empty($state['income'])) {
+  $item_hint = !empty($state['active_goal']['name']) ? 'How much does the '.$state['active_goal']['name'].' cost?' : 'What would you like to check? Tell me the item and the price.';
+  respond($db,$session_id,$state,'Great - '.$item_hint,null,['Other']);
+}
+
 // User wants to update all figures - soft reset to income step
-if (preg_match('/^(no|update|change|different|wrong|no update|no, update|reset|everything|all|start fresh|new figures)/i', $lower) && $state['step'] === 'active' && !empty($state['income'])) {
+if (preg_match('/^(no, update|no update|update them|change figures|different figures|wrong figures|start fresh|new figures|update all|change all|reset all)/i', $lower) && $state['step'] === 'active' && !empty($state['income'])) {
   $state['income']   = null;
   $state['expenses'] = null;
   $state['savings']  = null;
@@ -341,6 +347,11 @@ if (!$loan_mentioned && preg_match('/\bloan\b|\bborrow\b|\bfinance\b|\bmortgage\
 
 if ($loan_mentioned && !$action_taken) {
   if (!isset($state['loan'])) $state['loan'] = [];
+  // If loan mentioned but no amount/rate/term yet - ask for details
+  if (empty($state['loan']['amount']) && !$num) {
+    $item_name_hint = !empty($state['active_goal']['name']) ? ' for the '.$state['active_goal']['name'] : '';
+    respond($db,$session_id,$state,'Sure - to calculate a loan'.$item_name_hint.', I need three things: the loan amount, the annual interest rate (%), and the repayment term in years. What are these?',null,['Other']);
+  }
   $new_loan_scenario = ($num && $num >= 500) && ($interest !== null || $term !== null);
   if ($correction_field === 'loan_amount' && $num !== null) {
     $state['loan']['amount'] = $num;
@@ -430,10 +441,14 @@ if (!empty($state['income']) && !empty($state['expenses']) && isset($state['savi
         $parsed_name = trim($m[1]);
       }
     }
-    if ($parsed_name && strlen($parsed_name) > 1) {
+    // Exclude generic phrases like "another item", "something", "an item"
+    $generic = preg_match('/^(another item|something|an item|a thing|item|something else)$/i', trim($parsed_name ?? ''));
+    if ($parsed_name && strlen($parsed_name) > 1 && !$generic) {
       $state['active_goal'] = ['name' => $parsed_name, 'cost' => null, 'type' => $goal_type_hint ?? 'one-time'];
       $bot_reply = 'Sure - how much does the ' . $parsed_name . ' cost?';
       respond($db,$session_id,$state,$bot_reply,null,['Other']);
+    } elseif (!$parsed_name || $generic) {
+      respond($db,$session_id,$state,'What item would you like to check next, and how much does it cost?',null,['Other']);
     }
   } elseif (in_array('affordability_check',$intents) && !$refs_prev_goal && !$loan_mentioned && !$expense_change && !$is_extra_saving && $num && $num > 50) {
     $new_name = $goal_name_hint ?? ($state['active_goal']['name'] ?? null);
@@ -469,6 +484,18 @@ if (in_array('comparison',$intents) && count($state['checks']) >= 2 && !$action_
   $system_results['comparison'] =
     $prev['item_name'].' £'.number_format($prev['item_price'],2).': '.$prev['risk_level'].' risk, '.$fmt($prev['calc']['months_to_save']).' to save | '.
     $last['item_name'].' £'.number_format($last['item_price'],2).': '.$last['risk_level'].' risk, '.$fmt($last['calc']['months_to_save']).' to save';
+}
+
+// Detect "show table again" / "show result again" requests
+$show_again = preg_match('/show.{0,30}(table|result|card|risk)|table again|result again|see.{0,20}(table|result|card|risk)|(table|result|card).{0,20}again|show.{0,10}again/i', $message);
+if ($show_again && !empty($state['checks'])) {
+  $last_check = $state['checks'][count($state['checks'])-1];
+  $calc_again = array_merge($last_check['calc'], [
+    'item_name'  => $last_check['item_name'],
+    'item_price' => $last_check['item_price'],
+    'item_type'  => $last_check['item_type'],
+  ]);
+  respond($db,$session_id,$state,'Here is the result for '.$last_check['item_name'].' again.',$calc_again,$quick_replies);
 }
 
 $bot_reply = generateReply($message, $state, $history, $system_results);

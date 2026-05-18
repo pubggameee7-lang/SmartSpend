@@ -851,19 +851,142 @@ newSessionBtn.addEventListener('click', createSession);
 
 
 
-// Search - wire up once on page load
+// Simple title search in sidebar
 var searchInput = document.getElementById('session-search');
 if (searchInput) {
   searchInput.addEventListener('input', function() {
     var q = searchInput.value.toLowerCase().trim();
     document.querySelectorAll('.session-item').forEach(function(item) {
-      var text = item.textContent.toLowerCase();
-      item.style.display = (!q || text.includes(q)) ? '' : 'none';
+      item.style.display = (!q || item.textContent.toLowerCase().includes(q)) ? '' : 'none';
     });
     document.querySelectorAll('.project-folder').forEach(function(folder) {
-      var text = folder.textContent.toLowerCase();
-      folder.style.display = (!q || text.includes(q)) ? '' : 'none';
+      folder.style.display = (!q || folder.textContent.toLowerCase().includes(q)) ? '' : 'none';
     });
+  });
+  // Click on search box opens full search modal
+  searchInput.addEventListener('focus', function() {
+    searchInput.blur();
+    openSearchModal();
+  });
+}
+
+// Full text search modal
+var searchModal     = document.getElementById('search-modal');
+var searchModalInput = document.getElementById('search-modal-input');
+var searchModalResults = document.getElementById('search-modal-results');
+var searchModalClose = document.getElementById('search-modal-close');
+var modalTimer = null;
+
+function openSearchModal() {
+  searchModal.style.display = 'flex';
+  searchModalInput.value = '';
+  searchModalResults.innerHTML = '';
+  searchModalInput.focus();
+}
+
+function closeSearchModal() {
+  searchModal.style.display = 'none';
+  searchModalInput.value = '';
+  searchModalResults.innerHTML = '';
+}
+
+if (searchModalClose) {
+  searchModalClose.addEventListener('click', closeSearchModal);
+}
+
+if (searchModal) {
+  searchModal.addEventListener('click', function(e) {
+    if (e.target === searchModal) closeSearchModal();
+  });
+}
+
+// Ctrl+K opens modal
+document.addEventListener('keydown', function(e) {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+    e.preventDefault();
+    openSearchModal();
+  }
+  if (e.key === 'Escape') {
+    closeSearchModal();
+    document.querySelectorAll('.session-dropdown').forEach(function(d) { d.remove(); });
+  }
+});
+
+if (searchModalInput) {
+  searchModalInput.addEventListener('input', function() {
+    var q = searchModalInput.value.trim();
+    clearTimeout(modalTimer);
+    searchModalResults.innerHTML = '';
+
+    if (!q) return;
+
+    // Show loading
+    searchModalResults.innerHTML = '<div style="padding:16px;color:var(--text-muted);font-size:13px;text-align:center;">Searching...</div>';
+
+    modalTimer = setTimeout(async function() {
+      try {
+        var res  = await fetch(API_BASE + '/history.php?action=search&q=' + encodeURIComponent(q));
+        var data = await res.json();
+        searchModalResults.innerHTML = '';
+
+        if (!data.success || !data.results.length) {
+          searchModalResults.innerHTML = '<div style="padding:16px;color:var(--text-muted);font-size:13px;text-align:center;">No results found for "' + q + '"</div>';
+          return;
+        }
+
+        // Deduplicate by session
+        var seen = {};
+        data.results.forEach(function(r) {
+          if (seen[r.session_id]) return;
+          seen[r.session_id] = true;
+
+          var row = document.createElement('div');
+          row.style.cssText = 'padding:12px 16px;cursor:pointer;border-bottom:1px solid var(--border);';
+          row.addEventListener('mouseover', function() { row.style.background = 'var(--bg)'; });
+          row.addEventListener('mouseout',  function() { row.style.background = ''; });
+
+          var titleEl = document.createElement('div');
+          titleEl.style.cssText = 'font-weight:600;font-size:13px;color:var(--text);margin-bottom:4px;';
+          titleEl.textContent = r.session_title;
+
+          var snippetEl = document.createElement('div');
+          snippetEl.style.cssText = 'font-size:12px;color:var(--text-muted);line-height:1.5;';
+          var escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          var highlighted = r.snippet.replace(new RegExp('(' + escaped + ')', 'gi'), '<mark style="background:#E0F2F1;color:var(--primary);border-radius:2px;padding:0 2px;">$1</mark>');
+          snippetEl.innerHTML = highlighted;
+
+          row.appendChild(titleEl);
+          row.appendChild(snippetEl);
+
+          row.addEventListener('click', function() {
+            closeSearchModal();
+            var found = false;
+            document.querySelectorAll('.session-item').forEach(function(item) {
+              if (item.dataset.sessionId == r.session_id) {
+                item.click();
+                found = true;
+              }
+            });
+            if (!found) {
+              currentSessionId = r.session_id;
+              var dummy = document.createElement('div');
+              dummy.dataset.sessionId = r.session_id;
+              loadSessionMessages(r.session_id, dummy);
+            }
+          });
+
+          searchModalResults.appendChild(row);
+        });
+
+        var count = document.createElement('div');
+        count.style.cssText = 'padding:8px 16px;font-size:11px;color:var(--text-muted);background:var(--bg);border-top:1px solid var(--border);';
+        count.textContent = Object.keys(seen).length + ' chat(s) found';
+        searchModalResults.appendChild(count);
+
+      } catch(e) {
+        searchModalResults.innerHTML = '<div style="padding:16px;color:var(--text-muted);font-size:13px;">Search failed. Try again.</div>';
+      }
+    }, 400);
   });
 }
 

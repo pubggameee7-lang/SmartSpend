@@ -56,15 +56,16 @@ async function loadSessions() {
     const projData = await projRes.json();
 
     // PROJECTS section
-    var projLabel = document.createElement('div');
-    projLabel.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:4px 4px 2px;';
-    var projLabelText = document.createElement('span');
-    projLabelText.style.cssText = 'font-size:11px;color:var(--text-muted);font-weight:600;letter-spacing:0.5px;';
-    projLabelText.textContent = 'PROJECTS';
+    // PROJECTS - collapsed header like archive
+    var projHeader = document.createElement('div');
+    projHeader.style.cssText = 'font-size:11px;color:var(--text-muted);padding:4px 4px 2px;font-weight:600;letter-spacing:0.5px;cursor:pointer;user-select:none;display:flex;align-items:center;justify-content:space-between;';
+    var projToggleSpan = document.createElement('span');
+    projToggleSpan.textContent = '\u25b8 PROJECTS';
     var addProjBtn = document.createElement('button');
     addProjBtn.textContent = '+ New';
     addProjBtn.style.cssText = 'font-size:11px;padding:2px 8px;background:transparent;border:1px solid var(--border);border-radius:4px;color:var(--text-muted);cursor:pointer;font-family:Poppins,sans-serif;';
-    addProjBtn.addEventListener('click', async function() {
+    addProjBtn.addEventListener('click', async function(e) {
+      e.stopPropagation();
       var name = prompt('Project name:');
       if (name && name.trim()) {
         var formData = new FormData();
@@ -76,9 +77,20 @@ async function loadSessions() {
         else { alert('Failed to create project.'); }
       }
     });
-    projLabel.appendChild(projLabelText);
-    projLabel.appendChild(addProjBtn);
-    sessionList.appendChild(projLabel);
+    projHeader.appendChild(projToggleSpan);
+    projHeader.appendChild(addProjBtn);
+
+    var projList = document.createElement('div');
+    projList.style.cssText = 'display:none;flex-direction:column;gap:4px;';
+
+    projHeader.addEventListener('click', function() {
+      var open = projList.style.display !== 'none';
+      projList.style.display = open ? 'none' : 'flex';
+      projToggleSpan.textContent = (open ? '\u25b8' : '\u25be') + ' PROJECTS';
+    });
+
+    sessionList.appendChild(projHeader);
+    sessionList.appendChild(projList);
 
     if (projData.success && projData.projects.length > 0) {
       projData.projects.forEach(function(project) {
@@ -124,7 +136,7 @@ async function loadSessions() {
 
         folder.appendChild(folderHeader);
         folder.appendChild(folderSessions);
-        sessionList.appendChild(folder);
+        projList.appendChild(folder);
       });
     }
 
@@ -396,26 +408,60 @@ function showSessionMenu(sessionId, currentTitle, el, currentPinned, currentProj
       await fetch(`${API_BASE}/history.php`, { method: 'POST', body: formData });
       await loadSessions();
     } else {
-      // Show folder picker
-      const projRes  = await fetch(`${API_BASE}/history.php?action=projects`);
-      const projData = await projRes.json();
-      if (!projData.projects || projData.projects.length === 0) {
-        alert('No folders yet. Create a folder first using the + New Folder button.');
-        return;
-      }
-      const names = projData.projects.map(function(p, i) { return (i+1) + '. ' + p.name; }).join('\n');
-      const choice = prompt('Choose folder:\n' + names + '\n\nEnter number:');
-      if (choice) {
-        const idx = parseInt(choice) - 1;
-        if (idx >= 0 && idx < projData.projects.length) {
-          const formData = new FormData();
-          formData.append('action', 'assign_project');
-          formData.append('session_id', sessionId);
-          formData.append('project_id', projData.projects[idx].id);
-          await fetch(`${API_BASE}/history.php`, { method: 'POST', body: formData });
-          await loadSessions();
+      // Show inline project picker dropdown
+      document.querySelectorAll('.project-picker').forEach(function(p) { p.remove(); });
+      var pRes  = await fetch(`${API_BASE}/history.php?action=projects`);
+      var pData = await pRes.json();
+      var picker = document.createElement('div');
+      picker.className = 'project-picker session-dropdown';
+      picker.style.cssText = 'position:fixed;z-index:300;min-width:150px;max-width:200px;background:var(--white);border:1.5px solid var(--border);border-radius:var(--radius-sm);box-shadow:var(--shadow-md);overflow:hidden;';
+      // + New project at top
+      var newOpt = document.createElement('button');
+      newOpt.textContent = '+ New project';
+      newOpt.style.color = 'var(--primary)';
+      newOpt.addEventListener('click', async function() {
+        picker.remove();
+        var name = prompt('Project name:');
+        if (name && name.trim()) {
+          var fd = new FormData();
+          fd.append('action', 'create_project');
+          fd.append('name', name.trim());
+          var r = await fetch(`${API_BASE}/history.php`, { method: 'POST', body: fd });
+          var d = await r.json();
+          if (d.success) {
+            var fd2 = new FormData();
+            fd2.append('action', 'assign_project');
+            fd2.append('session_id', sessionId);
+            fd2.append('project_id', d.project_id);
+            await fetch(`${API_BASE}/history.php`, { method: 'POST', body: fd2 });
+            await loadSessions();
+          }
         }
+      });
+      picker.appendChild(newOpt);
+      if (pData.projects && pData.projects.length > 0) {
+        pData.projects.forEach(function(p) {
+          var opt = document.createElement('button');
+          opt.textContent = '\uD83D\uDCC1 ' + p.name;
+          opt.addEventListener('click', async function() {
+            picker.remove();
+            var fd = new FormData();
+            fd.append('action', 'assign_project');
+            fd.append('session_id', sessionId);
+            fd.append('project_id', p.id);
+            await fetch(`${API_BASE}/history.php`, { method: 'POST', body: fd });
+            await loadSessions();
+          });
+          picker.appendChild(opt);
+        });
       }
+      document.body.appendChild(picker);
+      var rect = el.getBoundingClientRect();
+      picker.style.top = rect.top + 'px';
+      picker.style.left = (rect.right + 4) + 'px';
+      setTimeout(function() {
+        document.addEventListener('click', function() { picker.remove(); }, { once: true });
+      }, 0);
     }
   });
 

@@ -28,11 +28,11 @@ function clean(string $value): string {
 if ($method === 'GET') {
 
   if ($action === 'sessions') {
-    $stmt = $db->prepare('SELECT id, title, created_at FROM sessions WHERE user_id = ? ORDER BY created_at DESC');
+    $stmt = $db->prepare('SELECT id, title, created_at, pinned, archived FROM sessions WHERE user_id = ? AND archived = 0 ORDER BY pinned DESC, created_at DESC');
     $stmt->execute([$user_id]);
     $sessions = $stmt->fetchAll();
     $clean_sessions = array_map(function($s) {
-      return ['id' => $s['id'], 'title' => clean($s['title']), 'created_at' => $s['created_at']];
+      return ['id' => $s['id'], 'title' => clean($s['title']), 'created_at' => $s['created_at'], 'pinned' => (bool)$s['pinned']];
     }, $sessions);
     echo json_encode(['success' => true, 'sessions' => $clean_sessions]);
     exit;
@@ -195,6 +195,50 @@ if ($method === 'POST') {
     $stmt = $db->prepare('DELETE FROM sessions WHERE id = ? AND user_id = ?');
     $stmt->execute([$session_id, $user_id]);
     echo json_encode(['success' => true]);
+    exit;
+  }
+
+  if ($action === 'pin_session') {
+    $session_id = intval($_POST['session_id'] ?? 0);
+    $pinned     = intval($_POST['pinned'] ?? 0);
+    if (!$session_id) { echo json_encode(['success' => false]); exit; }
+    $stmt = $db->prepare('UPDATE sessions SET pinned = ? WHERE id = ? AND user_id = ?');
+    $stmt->execute([$pinned, $session_id, $user_id]);
+    echo json_encode(['success' => true]);
+    exit;
+  }
+
+  if ($action === 'archive_session') {
+    $session_id = intval($_POST['session_id'] ?? 0);
+    if (!$session_id) { echo json_encode(['success' => false]); exit; }
+    $stmt = $db->prepare('UPDATE sessions SET archived = 1 WHERE id = ? AND user_id = ?');
+    $stmt->execute([$session_id, $user_id]);
+    echo json_encode(['success' => true]);
+    exit;
+  }
+
+  if ($action === 'duplicate_session') {
+    $session_id = intval($_POST['session_id'] ?? 0);
+    if (!$session_id) { echo json_encode(['success' => false, 'error' => 'Invalid session.']); exit; }
+    // Verify ownership
+    $stmt = $db->prepare('SELECT title FROM sessions WHERE id = ? AND user_id = ?');
+    $stmt->execute([$session_id, $user_id]);
+    $original = $stmt->fetch();
+    if (!$original) { echo json_encode(['success' => false, 'error' => 'Session not found.']); exit; }
+    // Create new session
+    $new_title = $original['title'] . ' (copy)';
+    $stmt = $db->prepare('INSERT INTO sessions (user_id, title) VALUES (?, ?)');
+    $stmt->execute([$user_id, $new_title]);
+    $new_session_id = $db->lastInsertId();
+    // Copy messages
+    $stmt = $db->prepare('SELECT role, content, calculation FROM messages WHERE session_id = ? ORDER BY created_at ASC');
+    $stmt->execute([$session_id]);
+    $messages = $stmt->fetchAll();
+    $insert = $db->prepare('INSERT INTO messages (session_id, role, content, calculation) VALUES (?, ?, ?, ?)');
+    foreach ($messages as $msg) {
+      $insert->execute([$new_session_id, $msg['role'], $msg['content'], $msg['calculation']]);
+    }
+    echo json_encode(['success' => true, 'session_id' => $new_session_id, 'title' => $new_title]);
     exit;
   }
 }

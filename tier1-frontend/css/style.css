@@ -411,3 +411,8 @@ a:hover { text-decoration: underline; }
     border: 2px solid ButtonText;
   }
 }
+
+.session-item.pinned {
+  border-color: var(--primary);
+  background: #E0F2F1;
+}

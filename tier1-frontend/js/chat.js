@@ -55,11 +55,11 @@ async function loadSessions() {
     if (data.success && data.sessions.length > 0) {
       data.sessions.forEach(session => {
         const item = document.createElement('div');
-        item.className = 'session-item' + (session.id == currentSessionId ? ' active' : '');
+        item.className = 'session-item' + (session.id == currentSessionId ? ' active' : '') + (session.pinned ? ' pinned' : '');
         item.dataset.sessionId = session.id;
 
         const title = document.createElement('span');
-        title.textContent        = session.title;
+        title.textContent        = (session.pinned ? '📌 ' : '') + session.title;
         title.style.flex         = '1';
         title.style.overflow     = 'hidden';
         title.style.textOverflow = 'ellipsis';
@@ -70,7 +70,7 @@ async function loadSessions() {
         menu.textContent = '\u22EF';
         menu.addEventListener('click', (e) => {
           e.stopPropagation();
-          showSessionMenu(session.id, session.title, item);
+          showSessionMenu(session.id, session.title, item, session.pinned);
         });
 
         item.appendChild(title);
@@ -92,7 +92,7 @@ async function loadSessions() {
   }
 }
 
-function showSessionMenu(sessionId, currentTitle, el) {
+function showSessionMenu(sessionId, currentTitle, el, currentPinned) {
   document.querySelectorAll('.session-dropdown').forEach(d => d.remove());
 
   const dropdown = document.createElement('div');
@@ -177,9 +177,43 @@ function showSessionMenu(sessionId, currentTitle, el) {
     } catch(err) { console.error('Export failed:', err); }
   });
 
+  const pinBtn = document.createElement('button');
+  pinBtn.textContent = currentPinned ? 'Unpin' : 'Pin to top';
+  pinBtn.addEventListener('click', async function(e) {
+    e.stopPropagation();
+    dropdown.remove();
+    const formData = new FormData();
+    formData.append('action', 'pin_session');
+    formData.append('session_id', sessionId);
+    formData.append('pinned', currentPinned ? 0 : 1);
+    await fetch(`${API_BASE}/history.php`, { method: 'POST', body: formData });
+    await loadSessions();
+  });
+
+  const archiveBtn = document.createElement('button');
+  archiveBtn.textContent = 'Archive';
+  archiveBtn.addEventListener('click', async function(e) {
+    e.stopPropagation();
+    if (confirm('Archive this session? It will be hidden from the list.')) {
+      dropdown.remove();
+      const formData = new FormData();
+      formData.append('action', 'archive_session');
+      formData.append('session_id', sessionId);
+      await fetch(`${API_BASE}/history.php`, { method: 'POST', body: formData });
+      if (currentSessionId == sessionId) {
+        currentSessionId = null;
+        clearChat();
+        showWelcome();
+      }
+      await loadSessions();
+    }
+  });
+
+  dropdown.appendChild(pinBtn);
   dropdown.appendChild(renameBtn);
   dropdown.appendChild(copyBtn);
   dropdown.appendChild(exportBtn);
+  dropdown.appendChild(archiveBtn);
   dropdown.appendChild(deleteBtn);
   el.appendChild(dropdown);
 

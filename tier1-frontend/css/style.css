@@ -416,3 +416,36 @@ a:hover { text-decoration: underline; }
   border-color: var(--primary);
   background: #E0F2F1;
 }
+
+
+.sidebar-search { padding: 4px 0; }
+.sidebar-search input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: 'Poppins', sans-serif;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg);
+  outline: none;
+}
+.sidebar-search input:focus { border-color: var(--primary); }
+.project-folder { display: flex; flex-direction: column; gap: 2px; }
+.project-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  border: 1.5px solid transparent;
+  transition: all 0.2s;
+}
+.project-header:hover { background: var(--bg); border-color: var(--border); }
+.project-toggle { font-size: 10px; color: var(--text-muted); flex-shrink: 0; }
+.project-name { flex: 1; }
+.project-sessions { display: flex; flex-direction: column; gap: 4px; padding-left: 12px; }

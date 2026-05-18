@@ -49,50 +49,206 @@ async function createSession() {
 
 async function loadSessions() {
   try {
-    const res  = await fetch(`${API_BASE}/history.php?action=sessions`);
-    const data = await res.json();
     sessionList.innerHTML = '';
-    if (data.success && data.sessions.length > 0) {
-      data.sessions.forEach(session => {
-        const item = document.createElement('div');
-        item.className = 'session-item' + (session.id == currentSessionId ? ' active' : '') + (session.pinned ? ' pinned' : '');
-        item.dataset.sessionId = session.id;
 
-        const title = document.createElement('span');
-        title.textContent        = (session.pinned ? '📌 ' : '') + session.title;
-        title.style.flex         = '1';
-        title.style.overflow     = 'hidden';
-        title.style.textOverflow = 'ellipsis';
-        title.style.whiteSpace   = 'nowrap';
+    // Load projects
+    const projRes  = await fetch(`${API_BASE}/history.php?action=projects`);
+    const projData = await projRes.json();
 
-        const menu = document.createElement('div');
-        menu.className   = 'session-menu';
-        menu.textContent = '\u22EF';
-        menu.addEventListener('click', (e) => {
+    if (projData.success && projData.projects.length > 0) {
+      var projLabel = document.createElement('div');
+      projLabel.style.cssText = 'font-size:11px;color:var(--text-muted);padding:4px 4px 2px;font-weight:600;letter-spacing:0.5px;';
+      projLabel.textContent = 'PROJECTS';
+      sessionList.appendChild(projLabel);
+      projData.projects.forEach(function(project) {
+        const folder = document.createElement('div');
+        folder.className = 'project-folder';
+
+        const folderHeader = document.createElement('div');
+        folderHeader.className = 'project-header';
+
+        const toggle = document.createElement('span');
+        toggle.className = 'project-toggle';
+        toggle.textContent = '\u25b8';
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'project-name';
+        nameSpan.textContent = '\uD83D\uDCC1 ' + project.name;
+
+        const folderMenu = document.createElement('div');
+        folderMenu.className = 'session-menu';
+        folderMenu.textContent = '\u22EF';
+        folderMenu.addEventListener('click', function(e) {
           e.stopPropagation();
-          showSessionMenu(session.id, session.title, item, session.pinned);
+          showProjectMenu(project.id, project.name, folderMenu);
         });
 
-        item.appendChild(title);
-        item.appendChild(menu);
-        item.addEventListener('click', () => loadSessionMessages(session.id, item));
-        item.setAttribute('tabindex', '0');
-        item.setAttribute('role', 'listitem');
-        item.addEventListener('keydown', function(e) {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            loadSessionMessages(session.id, item);
-          }
+        folderHeader.appendChild(toggle);
+        folderHeader.appendChild(nameSpan);
+        folderHeader.appendChild(folderMenu);
+
+        const folderSessions = document.createElement('div');
+        folderSessions.className = 'project-sessions';
+        folderSessions.style.display = 'none';
+
+        folderHeader.addEventListener('click', function() {
+          var isOpen = folderSessions.style.display !== 'none';
+          folderSessions.style.display = isOpen ? 'none' : 'flex';
+          toggle.textContent = isOpen ? '\u25b8' : '\u25be';
         });
-        sessionList.appendChild(item);
+
+        project.sessions.forEach(function(session) {
+          folderSessions.appendChild(buildSessionItem(session, project.id));
+        });
+
+        folder.appendChild(folderHeader);
+        folder.appendChild(folderSessions);
+        sessionList.appendChild(folder);
       });
     }
+
+    // Sessions not in any project
+    const res  = await fetch(`${API_BASE}/history.php?action=sessions`);
+    const data = await res.json();
+
+    if (data.success && data.sessions.length > 0) {
+      var ungrouped = data.sessions.filter(function(s) { return !s.project_id; });
+      if (ungrouped.length > 0) {
+        var chatsLabel = document.createElement('div');
+        chatsLabel.style.cssText = 'font-size:11px;color:var(--text-muted);padding:8px 4px 2px;font-weight:600;letter-spacing:0.5px;';
+        chatsLabel.textContent = 'CHATS';
+        sessionList.appendChild(chatsLabel);
+        ungrouped.forEach(function(session) {
+          sessionList.appendChild(buildSessionItem(session, null));
+        });
+      }
+    }
+
+
+
+    // Archived section
+    var archSection = document.getElementById('archive-section');
+    archSection.innerHTML = '';
+    var archRes  = await fetch(`${API_BASE}/history.php?action=archived_sessions`);
+    var archData = await archRes.json();
+    if (archData.success && archData.sessions.length > 0) {
+      var archHeader = document.createElement('div');
+      archHeader.style.cssText = 'font-size:11px;color:var(--text-muted);padding:8px 4px 4px;font-weight:600;letter-spacing:0.5px;cursor:pointer;user-select:none;border-top:1px solid var(--border);margin-top:8px;';
+      archHeader.textContent = '\u25b8 Archived (' + archData.sessions.length + ')';
+      var archList = document.createElement('div');
+      archList.style.cssText = 'display:none;flex-direction:column;gap:4px;';
+      archHeader.addEventListener('click', function() {
+        var open = archList.style.display !== 'none';
+        archList.style.display = open ? 'none' : 'flex';
+        archHeader.textContent = (open ? '\u25b8' : '\u25be') + ' Archived (' + archData.sessions.length + ')';
+      });
+      archData.sessions.forEach(function(session) {
+        var item = document.createElement('div');
+        item.className = 'session-item';
+        item.style.opacity = '0.7';
+        var title = document.createElement('span');
+        title.textContent = session.title;
+        title.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+        var restoreBtn = document.createElement('button');
+        restoreBtn.textContent = 'Restore';
+        restoreBtn.style.cssText = 'font-size:11px;padding:2px 8px;background:var(--primary);color:#fff;border:none;border-radius:4px;cursor:pointer;flex-shrink:0;';
+        restoreBtn.addEventListener('click', async function(e) {
+          e.stopPropagation();
+          var formData = new FormData();
+          formData.append('action', 'unarchive_session');
+          formData.append('session_id', session.id);
+          await fetch(`${API_BASE}/history.php`, { method: 'POST', body: formData });
+          await loadSessions();
+        });
+        item.appendChild(title);
+        item.appendChild(restoreBtn);
+        item.addEventListener('click', function() { loadSessionMessages(session.id, item); });
+        archList.appendChild(item);
+      });
+      archSection.appendChild(archHeader);
+      archSection.appendChild(archList);
+    }
+
+
+
   } catch (err) {
     console.error('Failed to load sessions:', err);
   }
 }
 
-function showSessionMenu(sessionId, currentTitle, el, currentPinned) {
+function buildSessionItem(session, projectId) {
+  var item = document.createElement('div');
+  item.className = 'session-item' + (session.id == currentSessionId ? ' active' : '') + (session.pinned ? ' pinned' : '');
+  item.dataset.sessionId = session.id;
+
+  var title = document.createElement('span');
+  title.textContent = (session.pinned ? '\uD83D\uDCCC ' : '') + session.title;
+  title.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+
+  var menu = document.createElement('div');
+  menu.className = 'session-menu';
+  menu.textContent = '\u22EF';
+  menu.addEventListener('click', function(e) {
+    e.stopPropagation();
+    showSessionMenu(session.id, session.title, item, session.pinned, projectId);
+  });
+
+  item.appendChild(title);
+  item.appendChild(menu);
+  item.addEventListener('click', function() { loadSessionMessages(session.id, item); });
+  item.setAttribute('tabindex', '0');
+  item.setAttribute('role', 'listitem');
+  item.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); loadSessionMessages(session.id, item); }
+  });
+  return item;
+}
+
+function showProjectMenu(projectId, projectName, el) {
+  document.querySelectorAll('.session-dropdown').forEach(function(d) { d.remove(); });
+  var dropdown = document.createElement('div');
+  dropdown.className = 'session-dropdown';
+
+  var renameBtn = document.createElement('button');
+  renameBtn.textContent = 'Rename folder';
+  renameBtn.addEventListener('click', async function(e) {
+    e.stopPropagation();
+    var name = prompt('New folder name:', projectName);
+    if (name && name.trim()) {
+      var formData = new FormData();
+      formData.append('action', 'rename_project');
+      formData.append('project_id', projectId);
+      formData.append('name', name.trim());
+      await fetch(`${API_BASE}/history.php`, { method: 'POST', body: formData });
+      await loadSessions();
+    }
+    dropdown.remove();
+  });
+
+  var deleteBtn = document.createElement('button');
+  deleteBtn.textContent = 'Delete folder';
+  deleteBtn.style.color = '#E74C3C';
+  deleteBtn.addEventListener('click', async function(e) {
+    e.stopPropagation();
+    if (confirm('Delete folder? Sessions will move to main list.')) {
+      var formData = new FormData();
+      formData.append('action', 'delete_project');
+      formData.append('project_id', projectId);
+      await fetch(`${API_BASE}/history.php`, { method: 'POST', body: formData });
+      await loadSessions();
+    }
+    dropdown.remove();
+  });
+
+  dropdown.appendChild(renameBtn);
+  dropdown.appendChild(deleteBtn);
+  el.parentNode.appendChild(dropdown);
+  setTimeout(function() {
+    document.addEventListener('click', function() { dropdown.remove(); }, { once: true });
+  }, 0);
+}
+
+function showSessionMenu(sessionId, currentTitle, el, currentPinned, currentProjectId) {
   document.querySelectorAll('.session-dropdown').forEach(d => d.remove());
 
   const dropdown = document.createElement('div');
@@ -209,8 +365,45 @@ function showSessionMenu(sessionId, currentTitle, el, currentPinned) {
     }
   });
 
+  const moveBtn = document.createElement('button');
+  moveBtn.textContent = currentProjectId ? 'Remove from folder' : 'Move to folder';
+  moveBtn.addEventListener('click', async function(e) {
+    e.stopPropagation();
+    dropdown.remove();
+    if (currentProjectId) {
+      const formData = new FormData();
+      formData.append('action', 'assign_project');
+      formData.append('session_id', sessionId);
+      formData.append('project_id', 'null');
+      await fetch(`${API_BASE}/history.php`, { method: 'POST', body: formData });
+      await loadSessions();
+    } else {
+      // Show folder picker
+      const projRes  = await fetch(`${API_BASE}/history.php?action=projects`);
+      const projData = await projRes.json();
+      if (!projData.projects || projData.projects.length === 0) {
+        alert('No folders yet. Create a folder first using the + New Folder button.');
+        return;
+      }
+      const names = projData.projects.map(function(p, i) { return (i+1) + '. ' + p.name; }).join('\n');
+      const choice = prompt('Choose folder:\n' + names + '\n\nEnter number:');
+      if (choice) {
+        const idx = parseInt(choice) - 1;
+        if (idx >= 0 && idx < projData.projects.length) {
+          const formData = new FormData();
+          formData.append('action', 'assign_project');
+          formData.append('session_id', sessionId);
+          formData.append('project_id', projData.projects[idx].id);
+          await fetch(`${API_BASE}/history.php`, { method: 'POST', body: formData });
+          await loadSessions();
+        }
+      }
+    }
+  });
+
   dropdown.appendChild(pinBtn);
   dropdown.appendChild(renameBtn);
+  dropdown.appendChild(moveBtn);
   dropdown.appendChild(copyBtn);
   dropdown.appendChild(exportBtn);
   dropdown.appendChild(archiveBtn);
@@ -591,6 +784,41 @@ userInput.addEventListener('keydown', function(e) {
 });
 
 newSessionBtn.addEventListener('click', createSession);
+
+var newProjectBtn = document.getElementById('new-project-btn');
+if (newProjectBtn) {
+  newProjectBtn.addEventListener('click', async function() {
+    var name = prompt('Project name:');
+    if (name && name.trim()) {
+      var formData = new FormData();
+      formData.append('action', 'create_project');
+      formData.append('name', name.trim());
+      var res = await fetch(API_BASE + '/history.php', { method: 'POST', body: formData });
+      var data = await res.json();
+      if (data.success) {
+        await loadSessions();
+      } else {
+        alert('Failed to create project: ' + (data.error || 'Unknown error'));
+      }
+    }
+  });
+}
+
+// Search - wire up once on page load
+var searchInput = document.getElementById('session-search');
+if (searchInput) {
+  searchInput.addEventListener('input', function() {
+    var q = searchInput.value.toLowerCase().trim();
+    document.querySelectorAll('.session-item').forEach(function(item) {
+      var text = item.textContent.toLowerCase();
+      item.style.display = (!q || text.includes(q)) ? '' : 'none';
+    });
+    document.querySelectorAll('.project-folder').forEach(function(folder) {
+      var text = folder.textContent.toLowerCase();
+      folder.style.display = (!q || text.includes(q)) ? '' : 'none';
+    });
+  });
+}
 
 if (logoutBtn) {
   logoutBtn.addEventListener('click', handleLogout);

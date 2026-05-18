@@ -28,11 +28,11 @@ function clean(string $value): string {
 if ($method === 'GET') {
 
   if ($action === 'sessions') {
-    $stmt = $db->prepare('SELECT id, title, created_at, pinned, archived FROM sessions WHERE user_id = ? AND archived = 0 ORDER BY pinned DESC, created_at DESC');
+    $stmt = $db->prepare('SELECT id, title, created_at, pinned, archived, project_id FROM sessions WHERE user_id = ? AND archived = 0 ORDER BY pinned DESC, created_at DESC');
     $stmt->execute([$user_id]);
     $sessions = $stmt->fetchAll();
     $clean_sessions = array_map(function($s) {
-      return ['id' => $s['id'], 'title' => clean($s['title']), 'created_at' => $s['created_at'], 'pinned' => (bool)$s['pinned']];
+      return ['id' => $s['id'], 'title' => clean($s['title']), 'created_at' => $s['created_at'], 'pinned' => (bool)$s['pinned'], 'project_id' => $s['project_id']];
     }, $sessions);
     echo json_encode(['success' => true, 'sessions' => $clean_sessions]);
     exit;
@@ -140,6 +140,17 @@ if ($method === 'GET') {
       ];
     }, $assessments);
     echo json_encode(['success' => true, 'assessments' => $clean_assessments]);
+    exit;
+  }
+
+  if ($action === 'archived_sessions') {
+    $stmt = $db->prepare('SELECT id, title, created_at FROM sessions WHERE user_id = ? AND archived = 1 ORDER BY created_at DESC');
+    $stmt->execute([$user_id]);
+    $sessions = $stmt->fetchAll();
+    $clean_sessions = array_map(function($s) {
+      return ['id' => $s['id'], 'title' => clean($s['title']), 'created_at' => $s['created_at']];
+    }, $sessions);
+    echo json_encode(['success' => true, 'sessions' => $clean_sessions]);
     exit;
   }
 

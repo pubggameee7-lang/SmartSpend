@@ -7,9 +7,7 @@
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body class="chat-page">
-  <!-- Skip to main content for screen readers -->
   <a href="#chat-box" class="skip-link">Skip to chat</a>
-
   <header class="header" role="banner">
     <div class="header-left">
       <h1 class="logo">Smart<span>Spend</span></h1>
@@ -21,26 +19,23 @@
       <button id="logout-btn" class="btn-outline" aria-label="Log out of SmartSpend">Log Out</button>
     </div>
   </header>
-
   <div class="chat-layout">
     <aside class="sidebar" role="navigation" aria-label="Chat sessions">
-      <button id="new-session-btn" class="btn-primary full-width" aria-label="Start a new chat session">+ New Session</button>
-      <div id="session-list" class="session-list" role="list" aria-label="Previous sessions"></div>
+      <button id="new-session-btn" class="btn-primary full-width">+ New Chat</button>
+      <div class="sidebar-search">
+        <input type="text" id="session-search" placeholder="🔍 Search chats..." />
+      </div>
+      <button id="new-project-btn" class="btn-outline full-width" style="font-size:13px;padding:7px;">+ New Project</button>
+      <div id="archive-section"></div>
+      <div id="session-list" class="session-list" role="list"></div>
     </aside>
-
     <main class="chat-main" role="main">
-      <div id="chat-box" class="chat-box" role="log" aria-live="polite" aria-label="Chat conversation" tabindex="0"></div>
-      <div id="quick-replies-container" class="quick-replies-container" role="group" aria-label="Quick reply options"></div>
+      <div id="chat-box" class="chat-box" role="log" aria-live="polite" tabindex="0"></div>
+      <div id="quick-replies-container" class="quick-replies-container" role="group"></div>
       <div class="input-area">
         <label for="user-input" class="sr-only">Type your message</label>
-        <textarea
-          id="user-input"
-          placeholder="Type your message here..."
-          rows="2"
-          aria-label="Type your message to SmartSpend"
-          aria-required="true"
-        ></textarea>
-        <button id="send-btn" class="btn-primary" aria-label="Send message">Send</button>
+        <textarea id="user-input" placeholder="Type your message here..." rows="2" aria-label="Type your message to SmartSpend"></textarea>
+        <button id="send-btn" class="btn-primary">Send</button>
       </div>
     </main>
   </div>

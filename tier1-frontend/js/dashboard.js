@@ -187,7 +187,20 @@ function renderItems(assessments) {
   }
 
   itemsList.innerHTML = '';
-  assessments.forEach((a, i) => {
+  var showMoreItemsBtn = document.getElementById('show-more-items-btn');
+  var itemsToShow = assessments.length > 3 ? 3 : assessments.length;
+  if (assessments.length > 3 && showMoreItemsBtn) {
+    showMoreItemsBtn.style.display = 'block';
+    showMoreItemsBtn.textContent = 'Show all (' + assessments.length + ')';
+    var itemsExpanded = false;
+    showMoreItemsBtn.onclick = function() {
+      itemsExpanded = !itemsExpanded;
+      itemsToShow = itemsExpanded ? assessments.length : 3;
+      showMoreItemsBtn.textContent = itemsExpanded ? 'Show less' : 'Show all (' + assessments.length + ')';
+      renderItems(assessments);
+    };
+  }
+  assessments.slice(0, itemsToShow).forEach((a, i) => {
     const risk      = a.risk_level;
     const riskLabel = risk === 'green' ? 'Low Risk' : risk === 'yellow' ? 'Moderate Risk' : 'High Risk';
     const months    = parseInt(a.months_to_save);
@@ -374,6 +387,25 @@ async function loadSessions() {
 
     totalSessions.textContent = data.sessions.length;
     sessionHistory.innerHTML  = '';
+    var showMoreSessionsBtn = document.getElementById('show-more-sessions-btn');
+    var sessionsToShow = data.sessions.length > 3 ? 3 : data.sessions.length;
+    if (data.sessions.length > 3 && showMoreSessionsBtn) {
+      showMoreSessionsBtn.style.display = 'block';
+      showMoreSessionsBtn.textContent = 'Show all (' + data.sessions.length + ')';
+      var sessionsExpanded = false;
+      showMoreSessionsBtn.onclick = function() {
+        sessionsExpanded = !sessionsExpanded;
+        sessionsToShow = sessionsExpanded ? data.sessions.length : 3;
+        showMoreSessionsBtn.textContent = sessionsExpanded ? 'Show less' : 'Show all (' + data.sessions.length + ')';
+        sessionHistory.innerHTML = '';
+        data.sessions.slice(0, sessionsToShow).forEach(function(s) {
+          var item = document.createElement('div');
+          item.className = 'history-item';
+          item.textContent = s.title + ' · ' + new Date(s.created_at).toLocaleDateString('en-GB');
+          sessionHistory.appendChild(item);
+        });
+      };
+    }
 
     await loadLastAssessment(data.sessions[0].id);
 

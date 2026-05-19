@@ -147,6 +147,11 @@
             <p class="score-desc">Based on your income, expenses, savings and spending decisions.</p>
           </div>
         </div>
+        <!-- Health Tips inside score card -->
+        <div style="margin-top:16px;border-top:2px solid var(--border);padding-top:12px;">
+          <p style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;">Personalised Tips</p>
+          <div id="health-tips-list"></div>
+        </div>
       </div>
 
       <div class="card">
@@ -156,11 +161,25 @@
         </div>
       </div>
     </div>
-      
-      <!-- Budget Health Tips -->
+
+    <!-- Savings Goal Tracker -->
     <div class="card">
-      <h2>Budget Health Tips</h2>
-      <div id="health-tips-list"><p class="empty-msg">Complete a chat session to see personalised tips.</p></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+        <h2 style="margin:0;">Savings Goal Tracker</h2>
+        <button id="add-goal-btn" class="btn-primary" style="font-size:12px;padding:6px 14px;">+ Add Goal</button>
+      </div>
+      <div id="savings-goals-list"><p class="empty-msg">No savings goals yet. Add one to track your progress.</p></div>
+      <div id="goal-form" style="display:none;margin-top:16px;background:var(--bg);border-radius:var(--radius-sm);padding:16px;">
+        <h3 style="font-size:14px;margin-bottom:12px;">New Savings Goal</h3>
+        <div class="form-group"><label>Item name</label><input type="text" id="goal-name" placeholder="e.g. MacBook Pro" /></div>
+        <div class="form-group"><label>Target amount (£)</label><input type="number" id="goal-target" placeholder="e.g. 1500" /></div>
+        <div class="form-group"><label>Deadline</label><input type="date" id="goal-deadline" /></div>
+        <div class="form-group"><label>Current savings toward this goal (£)</label><input type="number" id="goal-savings" placeholder="e.g. 200" value="0" /></div>
+        <div style="display:flex;gap:8px;margin-top:8px;">
+          <button id="save-goal-btn" class="btn-primary" style="font-size:13px;">Save Goal</button>
+          <button id="cancel-goal-btn" class="btn-outline" style="font-size:13px;">Cancel</button>
+        </div>
+      </div>
     </div>
 
     <!-- Stats Row -->
@@ -185,53 +204,23 @@
       <div id="goal-progress-list" class="progress-section"></div>
     </div>
 
-    
-
-    <!-- Savings Goal Tracker -->
+    <!-- Items Checked - last 3 only -->
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
-        <h2 style="margin:0;">Savings Goal Tracker</h2>
-        <button id="add-goal-btn" class="btn-primary" style="font-size:12px;padding:6px 14px;">+ Add Goal</button>
+        <h2 style="margin:0;">Items Checked</h2>
+        <button id="show-more-items-btn" style="display:none;font-size:12px;padding:5px 12px;background:transparent;border:1.5px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;color:var(--text);">Show all</button>
       </div>
-      <div id="savings-goals-list"><p class="empty-msg">No savings goals yet. Add one to track your progress.</p></div>
-
-      <!-- Add/Edit Goal Form -->
-      <div id="goal-form" style="display:none;margin-top:16px;background:var(--bg);border-radius:var(--radius-sm);padding:16px;">
-        <h3 style="font-size:14px;margin-bottom:12px;">New Savings Goal</h3>
-        <div class="form-group">
-          <label>Item name</label>
-          <input type="text" id="goal-name" placeholder="e.g. MacBook Pro" />
-        </div>
-        <div class="form-group">
-          <label>Target amount (£)</label>
-          <input type="number" id="goal-target" placeholder="e.g. 1500" />
-        </div>
-        <div class="form-group">
-          <label>Deadline</label>
-          <input type="date" id="goal-deadline" />
-        </div>
-        <div class="form-group">
-          <label>Current savings toward this goal (£)</label>
-          <input type="number" id="goal-savings" placeholder="e.g. 200" value="0" />
-        </div>
-        <div style="display:flex;gap:8px;margin-top:8px;">
-          <button id="save-goal-btn" class="btn-primary" style="font-size:13px;">Save Goal</button>
-          <button id="cancel-goal-btn" class="btn-outline" style="font-size:13px;">Cancel</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Items Checked -->
-    <div class="card">
-      <h2>Items Checked</h2>
       <div id="items-list" class="items-list">
         <p class="empty-msg">No items checked yet.</p>
       </div>
     </div>
 
-    <!-- Session History -->
+    <!-- Session History - last 3 only -->
     <div class="card">
-      <h2>Session History</h2>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+        <h2 style="margin:0;">Session History</h2>
+        <button id="show-more-sessions-btn" style="display:none;font-size:12px;padding:5px 12px;background:transparent;border:1.5px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;color:var(--text);">Show all</button>
+      </div>
       <div id="session-history" class="session-history">
         <p class="empty-msg">No sessions yet. Start a chat to see your history here.</p>
       </div>

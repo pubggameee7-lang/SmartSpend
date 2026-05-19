@@ -251,7 +251,13 @@ if ($state['step'] === 'savings') {
 // If memory just loaded, confirm figures before doing anything
 if (!empty($state['needs_memory_confirm'])) {
   $state['needs_memory_confirm'] = false;
-  $bot_reply = "Welcome back! I have your previous figures - income £".number_format($state['income'],2).", expenses £".number_format($state['expenses'],2).", savings £".number_format($state['savings'],2).". Are these still correct, or would you like to update them?";
+  $surplus = $state['income'] - $state['expenses'];
+  $bot_reply = "Welcome back! Here are your saved figures:
+
+📊 Income: £".number_format($state['income'],2)." | Expenses: £".number_format($state['expenses'],2)." | Savings: £".number_format($state['savings'],2)."
+💰 Monthly surplus: £".number_format($surplus,2)."
+
+Are these still correct, or would you like to update them?";
   respond($db,$session_id,$state,$bot_reply,null,['Yes, correct','No, update them','Other']);
 }
 

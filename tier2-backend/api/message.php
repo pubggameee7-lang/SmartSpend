@@ -294,7 +294,7 @@ $calculation    = null;
 $quick_replies  = ['Check another item','Run a stress test','Reset budget','Other'];
 $action_taken   = false;
 
-if ($income_change && $num && $num > 0 && !$action_taken) {
+if ($income_change && $num && $num > 0 && !$action_taken && !in_array('stress_test',$intents)) {
   if (preg_match('/(\d+(?:\.\d+)?)\s*%/i', $message, $pct) && !empty($state['income'])) {
     $new_income = round($state['income'] * (1 + floatval($pct[1]) / 100), 2);
   } else {
@@ -459,10 +459,20 @@ if ((in_array('custom_savings_calc',$intents) || in_array('saving_time',$intents
   }
 }
 
+// PHP stress test fallback
+if (!in_array('stress_test',$intents) && preg_match('/stress test|lost.*job|lose.*job|no income|income drop|salary cut|redundan|laid off|what if.*income|income.*drop|total loss|loss of income/i', $message)) {
+  $intents[] = 'stress_test';
+}
+// Force income_change off when stress testing
+if (in_array('stress_test',$intents)) $income_change = false;
+
 if (in_array('stress_test',$intents) && !empty($state['income']) && !empty($state['expenses']) && !$action_taken) {
   $pct        = null;
-  $total_loss = (bool)preg_match('/total|100|all|no income|zero/i', $message);
+  $total_loss = (bool)preg_match('/total|100|all|no income|zero|lost.*job|lose.*job|redundan|laid off|total loss/i', $message);
   if (preg_match('/(\d+)\s*%/i', $message, $m)) $pct = intval($m[1]);
+  if (!$total_loss && !$pct) {
+    respond($db,$session_id,$state,"Sure - let's run a stress test. What scenario would you like to test?\n\n- A percentage drop in income (e.g. 20% drop)\n- Total loss of income\n- A specific new income amount",null,['20% income drop','50% income drop','Total loss of income','Other']);
+  }
   if ($total_loss || $pct) {
     $new_inc  = $total_loss ? 0 : round($state['income'] * (1 - ($pct/100)), 2);
     $new_sur  = $new_inc - $state['expenses'];
@@ -490,7 +500,7 @@ if (!empty($state['income']) && !empty($state['expenses']) && isset($state['savi
     $new_name = $goal_name_hint;
     $new_cost = $num;
     $new_type = $goal_type_hint ?? 'one-time';
-  } elseif (!$loan_mentioned && !$expense_change && !$is_extra_saving && !$refs_prev_goal && !$num) {
+  } elseif (!$loan_mentioned && !$expense_change && !$is_extra_saving && !$refs_prev_goal && !$num && !in_array('stress_test',$intents)) {
     $parsed_name = $goal_name_hint;
     if (!$parsed_name) {
       if (preg_match('/(?:afford|buy|get|purchase|check)\s+(?:a\s+|an\s+)?([a-z][a-z\s]{1,30}?)(?:\s*\?|$)/i', $message, $m)) {
@@ -498,7 +508,7 @@ if (!empty($state['income']) && !empty($state['expenses']) && isset($state['savi
       }
     }
     // Exclude generic phrases like "another item", "something", "an item"
-    $generic = preg_match('/^(another item|something|an item|a thing|item|something else)$/i', trim($parsed_name ?? ''));
+    $generic = preg_match('/^(another item|something|an item|a thing|item|something else|total loss|loss of income|total loss of income|stress test|run a stress test)$/i', trim($parsed_name ?? ''));
     if ($parsed_name && strlen($parsed_name) > 1 && !$generic) {
       $state['active_goal'] = ['name' => $parsed_name, 'cost' => null, 'type' => $goal_type_hint ?? 'one-time'];
       $bot_reply = 'Sure - how much does the ' . $parsed_name . ' cost?';
@@ -602,7 +612,14 @@ if (!empty($system_results['updated_goal_timeline']) && !preg_match('/\d+ month|
 }
 
 if (!empty($system_results['stress_test']) && strpos(strtolower($bot_reply),'stress') === false) {
-  $bot_reply .= "\n\n".$system_results['stress_test'].'.';
+  $bot_reply = $system_results['stress_test'].'.';
+  if (!empty($state['active_goal']['name']) && !empty($state['active_goal']['cost'])) {
+    $stressed_surplus = floatval(explode('surplus = £', $system_results['stress_test'])[1] ?? 0);
+    if ($stressed_surplus > 0) {
+      $months = ceil((floatval($state['active_goal']['cost']) - ($state['savings']??0)) / $stressed_surplus);
+      $bot_reply .= "\n\nYour goal: ".$state['active_goal']['name']." (£".number_format($state['active_goal']['cost'],2).") would take approximately ".$months." months to save at this reduced surplus.";
+    }
+  }
 }
 
 $missing = getMissingBudgetField($state);

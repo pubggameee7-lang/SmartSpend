@@ -446,3 +446,188 @@ if (logoutBtn) {
   if (!authed) return;
   await Promise.all([loadHealthScore(), loadSessions()]);
 })();
+
+
+// ── Savings Goal Tracker ─────────────────────────────────
+const API_BASE_DASH = '../tier2-backend/api';
+
+async function loadSavingsGoals() {
+  try {
+    var res  = await fetch(API_BASE_DASH + '/history.php?action=savings_goals');
+    var data = await res.json();
+    var list = document.getElementById('savings-goals-list');
+    if (!list) return;
+    if (!data.success || !data.goals.length) {
+      list.innerHTML = '<p class="empty-msg">No savings goals yet. Add one to track your progress.</p>';
+      return;
+    }
+    list.innerHTML = '';
+    data.goals.forEach(function(g) {
+      var card = document.createElement('div');
+      card.style.cssText = 'background:var(--bg);border-radius:var(--radius-sm);padding:16px;margin-bottom:12px;border:1.5px solid var(--border);';
+
+      var deadline = new Date(g.deadline);
+      var deadlineStr = deadline.toLocaleDateString('en-GB', {month:'long', year:'numeric'});
+
+      var feasible = g.monthly_needed <= g.surplus;
+      var statusColour = g.months_left === 0 ? 'var(--risk-red)' : (feasible ? 'var(--risk-green)' : 'var(--risk-amber)');
+
+      var statusMsg = g.months_left === 0
+        ? 'Deadline has passed'
+        : 'Saving £' + g.monthly_needed.toFixed(2) + '/month for ' + g.months_left + ' month' + (g.months_left > 1 ? 's' : '') + ' to reach your goal. ' +
+          (feasible ? '✓ Achievable from your £' + g.surplus.toFixed(2) + ' monthly surplus.' : '⚠ Exceeds surplus by £' + (g.monthly_needed - g.surplus).toFixed(2) + '/month.');
+
+      card.innerHTML =
+        // Header
+        '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;">' +
+          '<div>' +
+            '<div style="font-weight:600;font-size:15px;color:var(--text);">' + g.item_name + '</div>' +
+            '<div style="font-size:12px;color:var(--text-muted);">Target: £' + g.target_amount.toFixed(2) + ' · Deadline: ' + deadlineStr + '</div>' +
+          '</div>' +
+          '<button onclick="deleteGoal(' + g.id + ')" style="background:none;border:none;cursor:pointer;color:var(--risk-red);font-size:20px;line-height:1;">×</button>' +
+        '</div>' +
+
+        // Savings display
+        '<div style="display:flex;justify-content:space-between;font-size:13px;font-weight:500;margin-bottom:6px;">' +
+          '<span style="color:var(--primary);">💰 £' + g.current_savings.toFixed(2) + ' saved</span>' +
+          '<span style="color:var(--text-muted);">£' + g.remaining.toFixed(2) + ' remaining · ' + g.pct + '%</span>' +
+        '</div>' +
+
+        // Progress bar
+        '<div style="background:#E0F2F1;border-radius:20px;height:10px;margin-bottom:10px;">' +
+          '<div style="background:var(--primary);border-radius:20px;height:10px;width:' + Math.min(g.pct,100) + '%;transition:width 0.5s;"></div>' +
+        '</div>' +
+
+        // Status message
+        '<div style="font-size:12px;color:' + statusColour + ';font-weight:500;margin-bottom:12px;">' + statusMsg + '</div>' +
+
+        // Budget figures
+        '<div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;">Based on: Income £' + g.income.toFixed(2) + ' · Expenses £' + g.expenses.toFixed(2) + ' · Surplus £' + g.surplus.toFixed(2) + '</div>' +
+
+        // Action buttons
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
+          '<button onclick="showAddSavings(' + g.id + ',' + g.current_savings + ')" style="font-size:12px;padding:5px 12px;background:var(--primary);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;">+ Add to savings</button>' +
+          '<button onclick="showUpdateDetails(' + g.id + ',' + g.current_savings + ',' + g.income + ',' + g.expenses + ')" style="font-size:12px;padding:5px 12px;background:transparent;border:1.5px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;color:var(--text);">Update details</button>' +
+        '</div>' +
+
+        // Inline form (hidden by default)
+        '<div id="goal-inline-' + g.id + '" style="display:none;margin-top:12px;background:var(--white);border:1.5px solid var(--border);border-radius:var(--radius-sm);padding:12px;">' +
+          '<div id="goal-add-savings-' + g.id + '" style="display:none;">' +
+            '<label style="font-size:12px;font-weight:500;display:block;margin-bottom:4px;">Amount to add (£)</label>' +
+            '<div style="display:flex;gap:8px;">' +
+              '<input type="number" id="add-savings-input-' + g.id + '" placeholder="e.g. 200" style="flex:1;padding:6px 10px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-family:Poppins,sans-serif;font-size:13px;outline:none;" />' +
+              '<button onclick="saveAddSavings(' + g.id + ',' + g.current_savings + ')" class="btn-primary" style="font-size:12px;padding:6px 12px;">Add</button>' +
+              '<button onclick="hideGoalForm(' + g.id + ')" class="btn-outline" style="font-size:12px;padding:6px 12px;">Cancel</button>' +
+            '</div>' +
+          '</div>' +
+          '<div id="goal-update-details-' + g.id + '" style="display:none;">' +
+            '<label style="font-size:12px;font-weight:500;display:block;margin-bottom:4px;">Current savings (£)</label>' +
+            '<input type="number" id="ud-savings-' + g.id + '" value="' + g.current_savings + '" style="width:100%;padding:6px 10px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-family:Poppins,sans-serif;font-size:13px;outline:none;margin-bottom:8px;" />' +
+            '<label style="font-size:12px;font-weight:500;display:block;margin-bottom:4px;">Monthly income (£)</label>' +
+            '<input type="number" id="ud-income-' + g.id + '" value="' + g.income + '" style="width:100%;padding:6px 10px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-family:Poppins,sans-serif;font-size:13px;outline:none;margin-bottom:8px;" />' +
+            '<label style="font-size:12px;font-weight:500;display:block;margin-bottom:4px;">Monthly expenses (£)</label>' +
+            '<input type="number" id="ud-expenses-' + g.id + '" value="' + g.expenses + '" style="width:100%;padding:6px 10px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-family:Poppins,sans-serif;font-size:13px;outline:none;margin-bottom:10px;" />' +
+            '<div style="display:flex;gap:8px;">' +
+              '<button onclick="saveUpdateDetails(' + g.id + ')" class="btn-primary" style="font-size:12px;padding:6px 14px;">Save</button>' +
+              '<button onclick="hideGoalForm(' + g.id + ')" class="btn-outline" style="font-size:12px;padding:6px 14px;">Cancel</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+
+      list.appendChild(card);
+    });
+  } catch(e) { console.error('Goals error:', e); }
+}
+
+function deleteGoal(id) {
+  if (!confirm('Delete this goal?')) return;
+  var fd = new FormData();
+  fd.append('action', 'delete_savings_goal');
+  fd.append('goal_id', id);
+  fetch(API_BASE_DASH + '/history.php', { method:'POST', body:fd })
+    .then(function() { loadSavingsGoals(); });
+}
+
+function showAddSavings(id, current) {
+  document.getElementById('goal-inline-' + id).style.display = 'block';
+  document.getElementById('goal-add-savings-' + id).style.display = 'block';
+  document.getElementById('goal-update-details-' + id).style.display = 'none';
+  document.getElementById('add-savings-input-' + id).focus();
+}
+
+function showUpdateDetails(id, savings, income, expenses) {
+  document.getElementById('goal-inline-' + id).style.display = 'block';
+  document.getElementById('goal-add-savings-' + id).style.display = 'none';
+  document.getElementById('goal-update-details-' + id).style.display = 'block';
+}
+
+function hideGoalForm(id) {
+  document.getElementById('goal-inline-' + id).style.display = 'none';
+}
+
+function saveAddSavings(id, current) {
+  var extra = parseFloat(document.getElementById('add-savings-input-' + id).value) || 0;
+  var total = current + extra;
+  var fd = new FormData();
+  fd.append('action', 'update_savings_goal');
+  fd.append('goal_id', id);
+  fd.append('current_savings', total);
+  fetch(API_BASE_DASH + '/history.php', { method:'POST', body:fd })
+    .then(function() { loadSavingsGoals(); });
+}
+
+function saveUpdateDetails(id) {
+  var savings  = document.getElementById('ud-savings-' + id).value;
+  var income   = document.getElementById('ud-income-' + id).value;
+  var expenses = document.getElementById('ud-expenses-' + id).value;
+  var fd = new FormData();
+  fd.append('action', 'update_savings_goal');
+  fd.append('goal_id', id);
+  fd.append('current_savings', savings);
+  fd.append('custom_income', income);
+  fd.append('custom_expenses', expenses);
+  fetch(API_BASE_DASH + '/history.php', { method:'POST', body:fd })
+    .then(function() { loadSavingsGoals(); });
+}
+
+// Wire up add goal form
+var addGoalBtn    = document.getElementById('add-goal-btn');
+var goalForm      = document.getElementById('goal-form');
+var saveGoalBtn   = document.getElementById('save-goal-btn');
+var cancelGoalBtn = document.getElementById('cancel-goal-btn');
+
+if (addGoalBtn) addGoalBtn.addEventListener('click', function() {
+  goalForm.style.display = goalForm.style.display === 'none' ? 'block' : 'none';
+});
+
+if (cancelGoalBtn) cancelGoalBtn.addEventListener('click', function() {
+  goalForm.style.display = 'none';
+});
+
+if (saveGoalBtn) saveGoalBtn.addEventListener('click', async function() {
+  var name     = document.getElementById('goal-name').value.trim();
+  var target   = document.getElementById('goal-target').value;
+  var deadline = document.getElementById('goal-deadline').value;
+  var savings  = document.getElementById('goal-savings').value || 0;
+  if (!name || !target || !deadline) { alert('Please fill in all fields.'); return; }
+  var fd = new FormData();
+  fd.append('action', 'create_savings_goal');
+  fd.append('item_name', name);
+  fd.append('target_amount', target);
+  fd.append('deadline', deadline);
+  fd.append('current_savings', savings);
+  var res  = await fetch(API_BASE_DASH + '/history.php', { method:'POST', body:fd });
+  var data = await res.json();
+  if (data.success) {
+    goalForm.style.display = 'none';
+    document.getElementById('goal-name').value = '';
+    document.getElementById('goal-target').value = '';
+    document.getElementById('goal-deadline').value = '';
+    document.getElementById('goal-savings').value = '0';
+    loadSavingsGoals();
+  } else {
+    alert('Failed to save goal: ' + (data.error || 'Unknown error'));
+  }
+});
+
+loadSavingsGoals();

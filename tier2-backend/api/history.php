@@ -143,6 +143,35 @@ if ($method === 'GET') {
     exit;
   }
 
+  if ($action === 'search') {
+    $q = trim($_GET['q'] ?? '');
+    if (!$q) { echo json_encode(['success' => true, 'results' => []]); exit; }
+    $stmt = $db->prepare('
+      SELECT DISTINCT s.id, s.title, m.content
+      FROM sessions s
+      JOIN messages m ON m.session_id = s.id
+      WHERE s.user_id = ? AND s.archived = 0
+      AND m.content LIKE ?
+      ORDER BY m.created_at DESC
+      LIMIT 20
+    ');
+    $stmt->execute([$user_id, '%' . $q . '%']);
+    $rows = $stmt->fetchAll();
+    $results = array_map(function($r) use ($q) {
+      // Extract snippet around keyword
+      $pos     = stripos($r['content'], $q);
+      $start   = max(0, $pos - 40);
+      $snippet = '...' . substr($r['content'], $start, 100) . '...';
+      return [
+        'session_id'   => $r['id'],
+        'session_title'=> clean($r['title']),
+        'snippet'      => clean($snippet),
+      ];
+    }, $rows);
+    echo json_encode(['success' => true, 'results' => $results]);
+    exit;
+  }
+
   if ($action === 'archived_sessions') {
     $stmt = $db->prepare('SELECT id, title, created_at FROM sessions WHERE user_id = ? AND archived = 1 ORDER BY created_at DESC');
     $stmt->execute([$user_id]);
@@ -175,6 +204,35 @@ if ($method === 'GET') {
     exit;
   }
 
+  if ($action === 'search') {
+    $q = trim($_GET['q'] ?? '');
+    if (!$q) { echo json_encode(['success' => true, 'results' => []]); exit; }
+    $stmt = $db->prepare('
+      SELECT DISTINCT s.id, s.title, m.content
+      FROM sessions s
+      JOIN messages m ON m.session_id = s.id
+      WHERE s.user_id = ? AND s.archived = 0
+      AND m.content LIKE ?
+      ORDER BY m.created_at DESC
+      LIMIT 20
+    ');
+    $stmt->execute([$user_id, '%' . $q . '%']);
+    $rows = $stmt->fetchAll();
+    $results = array_map(function($r) use ($q) {
+      // Extract snippet around keyword
+      $pos     = stripos($r['content'], $q);
+      $start   = max(0, $pos - 40);
+      $snippet = '...' . substr($r['content'], $start, 100) . '...';
+      return [
+        'session_id'   => $r['id'],
+        'session_title'=> clean($r['title']),
+        'snippet'      => clean($snippet),
+      ];
+    }, $rows);
+    echo json_encode(['success' => true, 'results' => $results]);
+    exit;
+  }
+
   if ($action === 'archived_sessions') {
     $stmt = $db->prepare('SELECT id, title, created_at FROM sessions WHERE user_id = ? AND archived = 1 ORDER BY created_at DESC');
     $stmt->execute([$user_id]);
@@ -183,6 +241,44 @@ if ($method === 'GET') {
       return ['id' => $s['id'], 'title' => clean($s['title']), 'created_at' => $s['created_at']];
     }, $sessions);
     echo json_encode(['success' => true, 'sessions' => $clean_sessions]);
+    exit;
+  }
+
+  if ($action === 'savings_goals') {
+    $stmt = $db->prepare('SELECT g.*, u.saved_income, u.saved_expenses FROM savings_goals g JOIN users u ON u.id = g.user_id WHERE g.user_id = ? ORDER BY g.created_at DESC');
+    $stmt->execute([$user_id]);
+    $goals = $stmt->fetchAll();
+    $result = [];
+    foreach ($goals as $g) {
+      $income   = $g['custom_income']   ?? $g['saved_income'];
+      $expenses = $g['custom_expenses'] ?? $g['saved_expenses'];
+      $surplus  = floatval($income) - floatval($expenses);
+      $remaining = max(0, floatval($g['target_amount']) - floatval($g['current_savings']));
+      $now      = new DateTime();
+      $deadline = new DateTime($g['deadline']);
+      $diff     = $now->diff($deadline);
+      $months_left = max(0, ($diff->y * 12) + $diff->m + ($diff->invert ? 0 : 0));
+      if ($deadline < $now) $months_left = 0;
+      $monthly_needed = $months_left > 0 ? ceil($remaining / $months_left) : $remaining;
+      $pct = $g['target_amount'] > 0 ? round((floatval($g['current_savings']) / floatval($g['target_amount'])) * 100) : 0;
+      $result[] = [
+        'id'             => $g['id'],
+        'item_name'      => clean($g['item_name']),
+        'target_amount'  => floatval($g['target_amount']),
+        'current_savings'=> floatval($g['current_savings']),
+        'deadline'       => $g['deadline'],
+        'custom_income'  => $g['custom_income'],
+        'custom_expenses'=> $g['custom_expenses'],
+        'income'         => floatval($income),
+        'expenses'       => floatval($expenses),
+        'surplus'        => round($surplus, 2),
+        'remaining'      => round($remaining, 2),
+        'months_left'    => $months_left,
+        'monthly_needed' => round($monthly_needed, 2),
+        'pct'            => $pct,
+      ];
+    }
+    echo json_encode(['success' => true, 'goals' => $result]);
     exit;
   }
 
@@ -237,6 +333,39 @@ if ($method === 'POST') {
     if (!$session_id) { echo json_encode(['success' => false, 'error' => 'Invalid session.']); exit; }
     $stmt = $db->prepare('DELETE FROM sessions WHERE id = ? AND user_id = ?');
     $stmt->execute([$session_id, $user_id]);
+    echo json_encode(['success' => true]);
+    exit;
+  }
+
+  if ($action === 'create_savings_goal') {
+    $item_name  = clean($_POST['item_name'] ?? '');
+    $target     = floatval($_POST['target_amount'] ?? 0);
+    $deadline   = clean($_POST['deadline'] ?? '');
+    $savings    = floatval($_POST['current_savings'] ?? 0);
+    if (!$item_name || !$target || !$deadline) { echo json_encode(['success'=>false,'error'=>'Missing fields']); exit; }
+    $stmt = $db->prepare('INSERT INTO savings_goals (user_id, item_name, target_amount, deadline, current_savings) VALUES (?,?,?,?,?)');
+    $stmt->execute([$user_id, $item_name, $target, $deadline, $savings]);
+    echo json_encode(['success' => true, 'id' => $db->lastInsertId()]);
+    exit;
+  }
+
+  if ($action === 'update_savings_goal') {
+    $goal_id  = intval($_POST['goal_id'] ?? 0);
+    $savings  = floatval($_POST['current_savings'] ?? 0);
+    $income   = isset($_POST['custom_income'])   && $_POST['custom_income']   !== '' ? floatval($_POST['custom_income'])   : null;
+    $expenses = isset($_POST['custom_expenses'])  && $_POST['custom_expenses'] !== '' ? floatval($_POST['custom_expenses']) : null;
+    if (!$goal_id) { echo json_encode(['success'=>false]); exit; }
+    $stmt = $db->prepare('UPDATE savings_goals SET current_savings=?, custom_income=?, custom_expenses=? WHERE id=? AND user_id=?');
+    $stmt->execute([$savings, $income, $expenses, $goal_id, $user_id]);
+    echo json_encode(['success' => true]);
+    exit;
+  }
+
+  if ($action === 'delete_savings_goal') {
+    $goal_id = intval($_POST['goal_id'] ?? 0);
+    if (!$goal_id) { echo json_encode(['success'=>false]); exit; }
+    $stmt = $db->prepare('DELETE FROM savings_goals WHERE id=? AND user_id=?');
+    $stmt->execute([$goal_id, $user_id]);
     echo json_encode(['success' => true]);
     exit;
   }

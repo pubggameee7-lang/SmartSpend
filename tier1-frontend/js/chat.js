@@ -958,9 +958,10 @@ async function sendMessage() {
         });
       }
       if (data.comparison_calc) {
-        // Show individual result card first
-        addMessage('bot', data.bot_reply, data.calculation || null);
-        // Then comparison side by side as separate message
+        // Show individual result card first (no text - just the card)
+        var riskLabel = data.calculation.risk_level === 'green' ? 'Good news' : data.calculation.risk_level === 'yellow' ? 'Heads up' : 'Warning';
+        addMessage('bot', riskLabel + ' - here is your result for ' + data.calculation.item_name + '.', data.calculation);
+        // Then comparison as separate message
         addMessage('bot', 'Here is your side by side comparison:', null);
         var compWrap = chatBox.querySelector('.message.bot:last-child .bubble');
         if (compWrap) compWrap.appendChild(buildComparisonCard(data.comparison_calc, data.calculation));

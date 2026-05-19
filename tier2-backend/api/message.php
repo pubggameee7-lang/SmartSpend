@@ -81,7 +81,6 @@ $history = array_values(array_filter($history_raw, function($m) use ($raw_messag
 function respond(PDO $db, int $sid, array $state, string $reply, ?array $calc, array $qr, ?array $comparison_calc = null): void {
   $stmt = $db->prepare('INSERT INTO conversation_state (session_id, state) VALUES (?, ?) ON DUPLICATE KEY UPDATE state=VALUES(state), updated_at=NOW()');
   $stmt->execute([$sid, json_encode($state)]);
-  // Save comparison_calc merged into calculation for persistence
   $save_calc = $calc;
   if ($comparison_calc) $save_calc = array_merge($calc ?? [], ['comparison_calc' => $comparison_calc]);
   $stmt = $db->prepare('INSERT INTO messages (session_id, role, content, calculation) VALUES (?, ?, ?, ?)');
@@ -92,23 +91,14 @@ function respond(PDO $db, int $sid, array $state, string $reply, ?array $calc, a
 
 function runCalc(PDO $db, int $sid, int $uid, array &$state, string $name, float $cost, string $type, array $history): array {
   $calc = calculate($state['income'], $state['expenses'], $state['savings'], $cost, $type);
-
   $db->prepare('INSERT INTO budgets (session_id,income,expenses,savings) VALUES (?,?,?,?)')->execute([$sid,$state['income'],$state['expenses'],$state['savings']]);
   $db->prepare('INSERT INTO assessments (session_id,item_name,item_price,item_type,risk_level,surplus,surplus_after,months_to_save) VALUES (?,?,?,?,?,?,?,?)')->execute([$sid,$name,$cost,$type,$calc['risk_level'],$calc['surplus'],$calc['surplus_after'],$calc['months_to_save']]);
   $db->prepare('INSERT INTO health_scores (user_id,score,trend) VALUES (?,?,?)')->execute([$uid,$calc['health_score'],'stable']);
-
   $state['checks'][] = ['item_name'=>$name,'item_price'=>$cost,'item_type'=>$type,'risk_level'=>$calc['risk_level'],'calc'=>$calc];
-
   $label  = $calc['risk_level']==='green' ? 'Good news' : ($calc['risk_level']==='yellow' ? 'Heads up' : 'Warning');
   $ai_ctx = "Income: £{$state['income']}. Expenses: £{$state['expenses']}. Savings: £{$state['savings']}. Item: {$name} at £".number_format($cost,2)." ({$type}). Surplus: £{$calc['surplus']}. Risk: {$calc['risk_level']}. Months to save: {$calc['months_to_save']}.";
   $ai     = getAIExplanation($ai_ctx, $calc['risk_level']);
-
-  return [
-    'label'       => $label,
-    'name'        => $name,
-    'ai_text'     => $ai,
-    'calculation' => array_merge($calc, ['item_name'=>$name,'item_price'=>$cost,'item_type'=>$type]),
-  ];
+  return ['label'=>$label,'name'=>$name,'ai_text'=>$ai,'calculation'=>array_merge($calc,['item_name'=>$name,'item_price'=>$cost,'item_type'=>$type])];
 }
 
 if (preg_match('/^(reset|start over|restart)$/i', $lower)) {
@@ -136,12 +126,10 @@ $is_question_only      = $ix['is_question_only'] ?? false;
 $is_emotional          = $ix['is_emotional'] ?? false;
 $is_unrelated          = $ix['is_unrelated'] ?? false;
 
-// Corrections ONLY fire in active step - during data collection steps
-// PHP just processes the number directly regardless of correction intent
 // Yes-confirm must run BEFORE correction check
 if (preg_match('/^(yes|yep|yeah|correct|all correct|they are correct|yes correct|thats correct|looks correct|looks good|right|thats right|same|use these|yes use|confirm|all good|sounds good|perfect|that is correct)/i', $lower) && $state['step'] === 'active' && !empty($state['income'])) {
   $item_hint = !empty($state['active_goal']['name']) ? 'How much does the '.$state['active_goal']['name'].' cost?' : 'What would you like to check? Tell me the item and the price.';
-  respond($db,$session_id,$state,'Great - '.$item_hint,null,['Other']);
+  respond($db,$session_id,$state,'Great - '.$item_hint,null,[]);
 }
 
 $correction_applicable = false;
@@ -257,33 +245,21 @@ if ($state['step'] === 'savings') {
   respond($db,$session_id,$state,generateReply($message,$state,$history),null,['£0','£500','£1000','Other']);
 }
 
-// If memory just loaded, confirm figures before doing anything
 if (!empty($state['needs_memory_confirm'])) {
   $state['needs_memory_confirm'] = false;
   $surplus = $state['income'] - $state['expenses'];
-  $bot_reply = "Welcome back! Here are your saved figures:
-
-📊 Income: £".number_format($state['income'],2)." | Expenses: £".number_format($state['expenses'],2)." | Savings: £".number_format($state['savings'],2)."
-💰 Monthly surplus: £".number_format($surplus,2)."
-
-Are these still correct, or would you like to update them?";
+  $bot_reply = "Welcome back! Here are your saved figures:\n\n📊 Income: £".number_format($state['income'],2)." | Expenses: £".number_format($state['expenses'],2)." | Savings: £".number_format($state['savings'],2)."\n💰 Monthly surplus: £".number_format($surplus,2)."\n\nAre these still correct, or would you like to update them?";
   respond($db,$session_id,$state,$bot_reply,null,['Yes, correct','No, update them','Other']);
 }
 
-// User confirms memory figures are correct - proceed to active
-if (preg_match('/^(yes|yep|yeah|correct|all correct|they are correct|yes correct|thats correct|looks correct|looks good|right|thats right|same|use these|yes use|confirm|all good|sounds good|perfect|that is correct)/i', $lower) && $state['step'] === 'active' && !empty($state['income'])) {
-  $item_hint = !empty($state['active_goal']['name']) ? 'How much does the '.$state['active_goal']['name'].' cost?' : 'What would you like to check? Tell me the item and the price.';
-  respond($db,$session_id,$state,'Great - '.$item_hint,null,['Other']);
-}
-
-// Compare with something else - ask for a different item
-if (preg_match('/compare|something else|alternative|versus|vs/i', $message) && $state['step'] === 'active' && !empty($state['checks']) && !$num) {
+// Compare with something else
+if (preg_match('/compare|something else|alternative|versus|vs/i', $message) && $state['step'] === 'active' && !empty($state['checks']) && !$num) {
   $last = $state['checks'][count($state['checks'])-1];
   $state['comparing'] = true;
   respond($db,$session_id,$state,'Sure - what item would you like to compare with the '.$last['item_name'].'? Tell me the item name and price.',null,[]);
 }
 
-// User wants to update all figures - soft reset to income step
+// User wants to update all figures
 if (preg_match('/^(no, update|no update|update them|update|change figures|different figures|wrong figures|start fresh|new figures|update all|change all|reset all|all|everything|change|new|different)/i', $lower) && $state['step'] === 'active' && !empty($state['income']) && !$goal_name_hint && !$num) {
   $state['income']   = null;
   $state['expenses'] = null;
@@ -362,37 +338,24 @@ if ($sub_mentioned && $num && $num > 0 && !$action_taken) {
   $system_results['new_surplus']        = '£'.number_format($new_surplus,2).'/month';
 }
 
-// Also detect loan from message directly in case LLM missed it
 if (!$loan_mentioned && preg_match('/\bloan\b|\bborrow\b|\bfinance\b|\bmortgage\b|\brepayment\b|\bcredit\b/i', $message)) {
   $loan_mentioned = true;
 }
 
 if ($loan_mentioned && !$action_taken) {
   if (!isset($state['loan'])) $state['loan'] = [];
-  // If loan mentioned but no amount/rate/term yet - ask for details
   if (empty($state['loan']['amount']) && !$num) {
     $item_name_hint = !empty($state['active_goal']['name']) ? ' for the '.$state['active_goal']['name'] : '';
     respond($db,$session_id,$state,'Sure - to calculate a loan'.$item_name_hint.', I need three things: the loan amount, the annual interest rate (%), and the repayment term in years. What are these?',null,['Other']);
   }
   $new_loan_scenario = ($num && $num >= 500) && ($interest !== null || $term !== null);
-  if ($correction_field === 'loan_amount' && $num !== null) {
-    $state['loan']['amount'] = $num;
-  } elseif ($num && $num >= 500 && ($new_loan_scenario || empty($state['loan']['amount']))) {
-    $state['loan']['amount'] = $num;
-  }
-  if ($correction_field === 'loan_interest' && $interest !== null) {
-    $state['loan']['interest'] = $interest;
-  } elseif ($interest !== null) {
-    $state['loan']['interest'] = $interest;
-  }
-  if ($correction_field === 'loan_months' && $term !== null) {
-    $state['loan']['months'] = $term;
-  } elseif ($term !== null) {
-    $state['loan']['months'] = $term;
-  }
-  if ($num && $num >= 500 && $interest !== null && $term !== null) {
-    $state['loan'] = ['amount' => $num, 'interest' => $interest, 'months' => $term];
-  }
+  if ($correction_field === 'loan_amount' && $num !== null) $state['loan']['amount'] = $num;
+  elseif ($num && $num >= 500 && ($new_loan_scenario || empty($state['loan']['amount']))) $state['loan']['amount'] = $num;
+  if ($correction_field === 'loan_interest' && $interest !== null) $state['loan']['interest'] = $interest;
+  elseif ($interest !== null) $state['loan']['interest'] = $interest;
+  if ($correction_field === 'loan_months' && $term !== null) $state['loan']['months'] = $term;
+  elseif ($term !== null) $state['loan']['months'] = $term;
+  if ($num && $num >= 500 && $interest !== null && $term !== null) $state['loan'] = ['amount'=>$num,'interest'=>$interest,'months'=>$term];
   if (!empty($state['loan']['amount']) && isset($state['loan']['interest']) && !empty($state['loan']['months'])) {
     $lc = calculateLoan(floatval($state['loan']['amount']), floatval($state['loan']['interest']), intval($state['loan']['months']));
     $state['loan']['monthly_payment'] = $lc['monthly_payment'];
@@ -400,9 +363,7 @@ if ($loan_mentioned && !$action_taken) {
     $state['loan']['total_interest']  = $lc['total_interest'];
     $surplus    = ($state['income'] ?? 0) - ($state['expenses'] ?? 0);
     $affordable = $lc['monthly_payment'] <= $surplus;
-    $state['loan']['affordable'] = $affordable
-      ? 'Affordable - within your £'.number_format($surplus,2).' monthly surplus'
-      : 'Not affordable - exceeds surplus by £'.number_format($lc['monthly_payment']-$surplus,2);
+    $state['loan']['affordable'] = $affordable ? 'Affordable - within your £'.number_format($surplus,2).' monthly surplus' : 'Not affordable - exceeds surplus by £'.number_format($lc['monthly_payment']-$surplus,2);
     $system_results['loan_monthly_payment'] = '£'.number_format($lc['monthly_payment'],2);
     $system_results['loan_total_repayment'] = '£'.number_format($lc['total_repayment'],2);
     $system_results['loan_total_interest']  = '£'.number_format($lc['total_interest'],2);
@@ -410,31 +371,23 @@ if ($loan_mentioned && !$action_taken) {
   }
 }
 
-// Savings deadline calculator - "save for X by December 2026"
 $deadline_match = preg_match('/by\s+(?:(\d{1,2})[\/\-](\d{4})|(\w+)\s+(\d{4})|(\d{4}))/i', $message, $dm);
 if ($deadline_match && !empty($state['active_goal']['cost']) && !empty($state['income']) && !$action_taken) {
   $target_date = null;
-  if (!empty($dm[3]) && !empty($dm[4])) {
-    // "by December 2026"
-    $target_date = date_create($dm[3] . ' ' . $dm[4]);
-  } elseif (!empty($dm[1]) && !empty($dm[2])) {
-    // "by 12/2026"
-    $target_date = date_create($dm[2] . '-' . $dm[1] . '-01');
-  } elseif (!empty($dm[5])) {
-    // "by 2026"
-    $target_date = date_create($dm[5] . '-12-01');
-  }
+  if (!empty($dm[3]) && !empty($dm[4])) $target_date = date_create($dm[3].' '.$dm[4]);
+  elseif (!empty($dm[1]) && !empty($dm[2])) $target_date = date_create($dm[2].'-'.$dm[1].'-01');
+  elseif (!empty($dm[5])) $target_date = date_create($dm[5].'-12-01');
   if ($target_date) {
-    $now           = new DateTime();
-    $diff          = $now->diff($target_date);
-    $months_left   = ($diff->y * 12) + $diff->m;
+    $now         = new DateTime();
+    $diff        = $now->diff($target_date);
+    $months_left = ($diff->y * 12) + $diff->m;
     if ($months_left > 0) {
       $ag        = $state['active_goal'];
       $remaining = max(0, $ag['cost'] - ($state['savings'] ?? 0));
       $needed    = $months_left > 0 ? ceil($remaining / $months_left) : $remaining;
       $surplus   = ($state['income'] ?? 0) - ($state['expenses'] ?? 0);
       $feasible  = $needed <= $surplus;
-      $system_results['deadline_calc'] = 'To afford '.$ag['name'].' (£'.number_format($ag['cost'],2).') by '.date_format($target_date,'F Y').': you need to save £'.number_format($needed,2).'/month for '.$months_left.' months. Your current surplus is £'.number_format($surplus,2).'/month. '.($feasible ? 'This is achievable.' : 'This exceeds your surplus by £'.number_format($needed-$surplus,2).'/month - consider a longer timeline or reducing expenses.');
+      $system_results['deadline_calc'] = 'To afford '.$ag['name'].' (£'.number_format($ag['cost'],2).') by '.date_format($target_date,'F Y').': you need to save £'.number_format($needed,2).'/month for '.$months_left.' months. Your current surplus is £'.number_format($surplus,2).'/month. '.($feasible ? 'This is achievable.' : 'This exceeds your surplus by £'.number_format($needed-$surplus,2).'/month.');
       $action_taken = true;
     }
   }
@@ -466,7 +419,6 @@ if ((in_array('custom_savings_calc',$intents) || in_array('saving_time',$intents
 if (!in_array('stress_test',$intents) && preg_match('/stress test|lost.*job|lose.*job|no income|income drop|salary cut|redundan|laid off|what if.*income|income.*drop|total loss|loss of income/i', $message)) {
   $intents[] = 'stress_test';
 }
-// Force income_change off when stress testing
 if (in_array('stress_test',$intents)) $income_change = false;
 
 if (in_array('stress_test',$intents) && !empty($state['income']) && !empty($state['expenses']) && !$action_taken) {
@@ -492,9 +444,8 @@ if (!empty($state['income']) && !empty($state['expenses']) && isset($state['savi
   $new_cost = null;
   $new_type = 'one-time';
 
-  // Fallback - parse item name directly if LLM missed it
   if (!$goal_name_hint && $num && $num > 50 && !$loan_mentioned && !$expense_change && !$sub_mentioned && !$is_extra_saving) {
-    $stripped = preg_replace('/' . preg_quote(number_format($num,0,'.',','), '/') . '|£[\d,]+k?|\d+k?/i', '', $message);
+    $stripped = preg_replace('/'.preg_quote(number_format($num,0,'.',','),'/').'|£[\d,]+k?|\d+k?/i', '', $message);
     $stripped = trim(preg_replace('/\s+/', ' ', $stripped));
     if (strlen($stripped) > 2) $goal_name_hint = $stripped;
   }
@@ -510,14 +461,13 @@ if (!empty($state['income']) && !empty($state['expenses']) && isset($state['savi
         $parsed_name = trim($m[1]);
       }
     }
-    // Exclude generic phrases like "another item", "something", "an item"
     $generic = preg_match('/^(another item|something|an item|a thing|item|something else|total loss|loss of income|total loss of income|stress test|run a stress test)$/i', trim($parsed_name ?? ''));
     if ($parsed_name && strlen($parsed_name) > 1 && !$generic) {
       $state['active_goal'] = ['name' => $parsed_name, 'cost' => null, 'type' => $goal_type_hint ?? 'one-time'];
-      $bot_reply = 'Sure - how much does the ' . $parsed_name . ' cost?';
-      respond($db,$session_id,$state,$bot_reply,null,['Other']);
+      $bot_reply = 'Sure - how much does the '.$parsed_name.' cost?';
+      respond($db,$session_id,$state,$bot_reply,null,[]);
     } elseif (!$parsed_name || $generic) {
-      respond($db,$session_id,$state,'What item would you like to check next, and how much does it cost?',null,['Other']);
+      respond($db,$session_id,$state,'What item would you like to check next, and how much does it cost?',null,[]);
     }
   } elseif (in_array('affordability_check',$intents) && !$refs_prev_goal && !$loan_mentioned && !$expense_change && !$is_extra_saving && $num && $num > 50) {
     $new_name = $goal_name_hint ?? ($state['active_goal']['name'] ?? null);
@@ -555,15 +505,10 @@ if (in_array('comparison',$intents) && count($state['checks']) >= 2 && !$action_
     $last['item_name'].' £'.number_format($last['item_price'],2).': '.$last['risk_level'].' risk, '.$fmt($last['calc']['months_to_save']).' to save';
 }
 
-// Detect "show table again" / "show result again" requests
 $show_again = preg_match('/show.{0,30}(table|result|card|risk)|table again|result again|see.{0,20}(table|result|card|risk)|(table|result|card).{0,20}again|show.{0,10}again/i', $message);
 if ($show_again && !empty($state['checks'])) {
   $last_check = $state['checks'][count($state['checks'])-1];
-  $calc_again = array_merge($last_check['calc'], [
-    'item_name'  => $last_check['item_name'],
-    'item_price' => $last_check['item_price'],
-    'item_type'  => $last_check['item_type'],
-  ]);
+  $calc_again = array_merge($last_check['calc'], ['item_name'=>$last_check['item_name'],'item_price'=>$last_check['item_price'],'item_type'=>$last_check['item_type']]);
   respond($db,$session_id,$state,'Here is the result for '.$last_check['item_name'].' again.',$calc_again,$quick_replies);
 }
 

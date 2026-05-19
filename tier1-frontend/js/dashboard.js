@@ -1,6 +1,6 @@
 const API_BASE = '../tier2-backend/api';
 
-// Elements 
+// ── Elements ──────────────────────────────────────────────
 const scoreNumber      = document.getElementById('score-number');
 const scoreTrend       = document.getElementById('score-trend');
 const scoreCircle      = document.getElementById('score-circle');
@@ -20,7 +20,7 @@ const itemsList        = document.getElementById('items-list');
 
 let scoreChart = null;
 
-// Spending personality engine
+// ── Spending personality engine ───────────────────────────
 function getPersonality(expenseRatio, savingsRatio) {
   if (expenseRatio === null) return null;
 
@@ -52,7 +52,7 @@ function getPersonality(expenseRatio, savingsRatio) {
   };
 }
 
-//  Health score colour helper 
+// ── Health score colour helper ────────────────────────────
 function applyScoreColour(score) {
   let colour;
   if (score >= 70)      colour = '#27AE60';
@@ -65,7 +65,7 @@ function applyScoreColour(score) {
   return colour;
 }
 
-//  Draw trend chart 
+// ── Draw trend chart ──────────────────────────────────────
 function drawChart(labels, scores) {
   const ctx = document.getElementById('scoreChart').getContext('2d');
 
@@ -131,7 +131,7 @@ function drawChart(labels, scores) {
   });
 }
 
-//  Render goal progress bars 
+// ── Render goal progress bars ─────────────────────────────
 function renderGoalProgress(assessments, lastBudget) {
   if (!assessments || assessments.length === 0) return;
   if (!lastBudget) return;
@@ -179,7 +179,7 @@ function renderGoalProgress(assessments, lastBudget) {
   goalCard.style.display = 'block';
 }
 
-//  Render all items checked 
+// ── Render all items checked ──────────────────────────────
 function renderItems(assessments) {
   if (!assessments || assessments.length === 0) {
     itemsList.innerHTML = '<p class="empty-msg">No items checked yet.</p>';
@@ -227,7 +227,7 @@ function renderItems(assessments) {
 }
 
 
-//  Export PDF from dashboard 
+// ── Export PDF from dashboard ─────────────────────────────
 function exportPDF(assessment, budget, personality) {
   var risk      = assessment.risk_level;
   var riskLabel = risk === 'green' ? 'LOW RISK' : risk === 'yellow' ? 'MODERATE RISK' : 'HIGH RISK';
@@ -295,7 +295,7 @@ function exportPDF(assessment, budget, personality) {
   win.document.close();
 }
 
-//  Check auth 
+// ── Check auth ────────────────────────────────────────────
 async function checkAuth() {
   try {
     const fd = new FormData();
@@ -311,7 +311,7 @@ async function checkAuth() {
   }
 }
 
-//  Load health score + trend 
+// ── Load health score + trend ─────────────────────────────
 async function loadHealthScore() {
   try {
     const res  = await fetch(`${API_BASE}/history.php?action=health_score`);
@@ -358,7 +358,7 @@ async function loadHealthScore() {
   }
 }
 
-//  Load sessions 
+// ── Load sessions ─────────────────────────────────────────
 async function loadSessions() {
   try {
     const res  = await fetch(`${API_BASE}/history.php?action=sessions`);
@@ -396,7 +396,7 @@ async function loadSessions() {
   }
 }
 
-//  Load last assessment + all items 
+// ── Load last assessment + all items ─────────────────────
 async function loadLastAssessment(sessionId) {
   try {
     const res  = await fetch(`${API_BASE}/history.php?action=all_assessments`);
@@ -416,6 +416,10 @@ async function loadLastAssessment(sessionId) {
       const budgetData = await budgetRes.json();
       if (budgetData.success && budgetData.budget) {
         renderGoalProgress(data.assessments, budgetData.budget);
+        // Render health tips using budget + health score
+        var scoreEl = document.getElementById('score-number');
+        var currentScore = scoreEl ? parseInt(scoreEl.textContent) || 0 : 0;
+        renderHealthTips(budgetData.budget, currentScore);
       }
     } else {
       lastRisk.textContent = '--';
@@ -427,7 +431,7 @@ async function loadLastAssessment(sessionId) {
   }
 }
 
-//  Logout 
+// ── Logout ────────────────────────────────────────────────
 if (logoutBtn) {
   logoutBtn.addEventListener('click', async () => {
     try {
@@ -440,7 +444,7 @@ if (logoutBtn) {
   });
 }
 
-// Init 
+// ── Init ──────────────────────────────────────────────────
 (async () => {
   const authed = await checkAuth();
   if (!authed) return;
@@ -448,7 +452,60 @@ if (logoutBtn) {
 })();
 
 
-//  Savings Goal Tracker
+// ── Budget Health Tips ───────────────────────────────────
+function renderHealthTips(budget, healthScore) {
+  var container = document.getElementById('health-tips-list');
+  if (!container) return;
+
+  var income   = parseFloat(budget.income) || 0;
+  var expenses = parseFloat(budget.expenses) || 0;
+  var savings  = parseFloat(budget.savings) || 0;
+  var surplus  = income - expenses;
+  var er       = income > 0 ? (expenses / income) * 100 : 0;
+  var ef       = expenses * 3;
+
+  var tips = [];
+
+  if (er > 85) {
+    tips.push({ icon: '🔴', text: 'Your expenses use ' + er.toFixed(0) + '% of your income. Try cutting £' + Math.round((expenses - income * 0.75)).toFixed(0) + '/month to reach a healthier 75% ratio.' });
+  } else if (er > 70) {
+    tips.push({ icon: '🟡', text: 'Expenses are ' + er.toFixed(0) + '% of income. Aim to keep this below 70% for financial flexibility.' });
+  } else {
+    tips.push({ icon: '🟢', text: 'Great expense ratio at ' + er.toFixed(0) + '%. You are managing costs well.' });
+  }
+
+  if (savings < ef) {
+    var shortfall = (ef - savings).toFixed(2);
+    tips.push({ icon: '⚠️', text: 'Emergency fund is £' + shortfall + ' short of the recommended 3-month cover (£' + ef.toFixed(2) + '). Prioritise building this before large purchases.' });
+  } else {
+    tips.push({ icon: '✅', text: 'Your emergency fund covers ' + Math.floor(savings / expenses) + ' months of expenses. Well done.' });
+  }
+
+  if (surplus <= 0) {
+    tips.push({ icon: '🔴', text: 'You have no monthly surplus. Your expenses exceed income - review your spending immediately.' });
+  } else if (surplus < income * 0.1) {
+    tips.push({ icon: '🟡', text: 'Your surplus of £' + surplus.toFixed(2) + '/month is very thin (under 10% of income). One unexpected expense could cause problems.' });
+  } else if (surplus >= income * 0.2) {
+    tips.push({ icon: '🟢', text: 'Strong surplus of £' + surplus.toFixed(2) + '/month (' + Math.round((surplus/income)*100) + '% of income). You are in a great position to save.' });
+  }
+
+  if (healthScore >= 80) {
+    tips.push({ icon: '🌟', text: 'Excellent financial health score of ' + healthScore + '/100. Keep maintaining these habits.' });
+  } else if (healthScore >= 60) {
+    tips.push({ icon: '💡', text: 'Good score of ' + healthScore + '/100. Reducing expenses by 10% would add £' + (expenses * 0.1).toFixed(2) + '/month to your surplus.' });
+  } else {
+    tips.push({ icon: '💡', text: 'Health score of ' + healthScore + '/100 needs improvement. Focus on reducing expenses and building your emergency fund.' });
+  }
+
+  container.innerHTML = tips.map(function(t) {
+    return '<div style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--border);">' +
+      '<span style="font-size:16px;flex-shrink:0;">' + t.icon + '</span>' +
+      '<span style="font-size:13px;color:var(--text);line-height:1.5;">' + t.text + '</span>' +
+    '</div>';
+  }).join('');
+}
+
+// ── Savings Goal Tracker ─────────────────────────────────
 const API_BASE_DASH = '../tier2-backend/api';
 
 async function loadSavingsGoals() {
@@ -641,6 +698,7 @@ if (saveGoalBtn) saveGoalBtn.addEventListener('click', async function() {
     document.getElementById('goal-deadline').value = '';
     document.getElementById('goal-savings').value = '0';
     loadSavingsGoals();
+    // Health tips are rendered from existing data - called after budget loads
   } else {
     alert('Failed to save goal: ' + (data.error || 'Unknown error'));
   }

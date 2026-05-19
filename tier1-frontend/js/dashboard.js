@@ -1,6 +1,20 @@
+// Dark mode - apply on load and wire toggle
+if (localStorage.getItem('darkMode') === 'true') {
+  document.body.classList.add('dark-mode');
+}
+var darkModeBtn = document.getElementById('dark-mode-btn');
+if (darkModeBtn) {
+  darkModeBtn.textContent = localStorage.getItem('darkMode') === 'true' ? '☀️' : '🌙';
+  darkModeBtn.addEventListener('click', function() {
+    var isDark = document.body.classList.toggle('dark-mode');
+    darkModeBtn.textContent = isDark ? '☀️' : '🌙';
+    localStorage.setItem('darkMode', isDark);
+  });
+}
+
 const API_BASE = '../tier2-backend/api';
 
-//  Elements 
+// Elements 
 const scoreNumber      = document.getElementById('score-number');
 const scoreTrend       = document.getElementById('score-trend');
 const scoreCircle      = document.getElementById('score-circle');
@@ -20,7 +34,7 @@ const itemsList        = document.getElementById('items-list');
 
 let scoreChart = null;
 
-//  Spending personality engine 
+// Spending personality engine 
 function getPersonality(expenseRatio, savingsRatio) {
   if (expenseRatio === null) return null;
 
@@ -52,7 +66,7 @@ function getPersonality(expenseRatio, savingsRatio) {
   };
 }
 
-// Health score colour helper 
+//  Health score colour helper 
 function applyScoreColour(score) {
   let colour;
   if (score >= 70)      colour = '#27AE60';
@@ -131,7 +145,7 @@ function drawChart(labels, scores) {
   });
 }
 
-//  Render goal progress bars
+//  Render goal progress bars 
 function renderGoalProgress(assessments, lastBudget) {
   if (!assessments || assessments.length === 0) return;
   if (!lastBudget) return;
@@ -179,7 +193,7 @@ function renderGoalProgress(assessments, lastBudget) {
   goalCard.style.display = 'block';
 }
 
-// Render all items checked 
+//  Render all items checked 
 function renderItems(assessments) {
   if (!assessments || assessments.length === 0) {
     itemsList.innerHTML = '<p class="empty-msg">No items checked yet.</p>';
@@ -324,7 +338,7 @@ async function checkAuth() {
   }
 }
 
-// Load health score + trend 
+//  Load health score + trend 
 async function loadHealthScore() {
   try {
     const res  = await fetch(`${API_BASE}/history.php?action=health_score`);
@@ -428,7 +442,7 @@ async function loadSessions() {
   }
 }
 
-//  Load last assessment + all items 
+//Load last assessment + all items 
 async function loadLastAssessment(sessionId) {
   try {
     const res  = await fetch(`${API_BASE}/history.php?action=all_assessments`);
@@ -463,7 +477,7 @@ async function loadLastAssessment(sessionId) {
   }
 }
 
-// Logout 
+//  Logout 
 if (logoutBtn) {
   logoutBtn.addEventListener('click', async () => {
     try {
@@ -476,7 +490,7 @@ if (logoutBtn) {
   });
 }
 
-// Init
+// Init 
 (async () => {
   const authed = await checkAuth();
   if (!authed) return;
@@ -484,7 +498,7 @@ if (logoutBtn) {
 })();
 
 
-//  Budget Health Tips 
+// Budget Health Tips
 function renderHealthTips(budget, healthScore) {
   var container = document.getElementById('health-tips-list');
   if (!container) return;
@@ -537,7 +551,7 @@ function renderHealthTips(budget, healthScore) {
   }).join('');
 }
 
-// Savings Goal Tracker
+// Savings Goal Tracker 
 const API_BASE_DASH = '../tier2-backend/api';
 
 var goalsMap = {};

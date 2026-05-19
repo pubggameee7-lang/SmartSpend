@@ -268,7 +268,7 @@ if (preg_match('/^(yes|yep|yeah|correct|all correct|they are correct|yes correct
 }
 
 // User wants to update all figures - soft reset to income step
-if (preg_match('/^(no, update|no update|update them|change figures|different figures|wrong figures|start fresh|new figures|update all|change all|reset all)/i', $lower) && $state['step'] === 'active' && !empty($state['income'])) {
+if (preg_match('/^(no, update|no update|update them|update|change figures|different figures|wrong figures|start fresh|new figures|update all|change all|reset all|all|everything|change|new|different)/i', $lower) && $state['step'] === 'active' && !empty($state['income']) && !$goal_name_hint && !$num) {
   $state['income']   = null;
   $state['expenses'] = null;
   $state['savings']  = null;

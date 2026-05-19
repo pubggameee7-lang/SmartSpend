@@ -135,6 +135,12 @@ $is_unrelated          = $ix['is_unrelated'] ?? false;
 
 // Corrections ONLY fire in active step - during data collection steps
 // PHP just processes the number directly regardless of correction intent
+// Yes-confirm must run BEFORE correction check
+if (preg_match('/^(yes|yep|yeah|correct|all correct|they are correct|yes correct|thats correct|looks correct|looks good|right|thats right|same|use these|yes use|confirm|all good|sounds good|perfect|that is correct)/i', $lower) && $state['step'] === 'active' && !empty($state['income'])) {
+  $item_hint = !empty($state['active_goal']['name']) ? 'How much does the '.$state['active_goal']['name'].' cost?' : 'What would you like to check? Tell me the item and the price.';
+  respond($db,$session_id,$state,'Great - '.$item_hint,null,['Other']);
+}
+
 $correction_applicable = false;
 if ($is_correction && $state['step'] === 'active') {
   if ($correction_field === 'income'   && !empty($state['income']))   $correction_applicable = true;

@@ -907,6 +907,20 @@ document.addEventListener('keydown', function(e) {
   }
 });
 
+// Dark mode toggle
+var darkModeBtn = document.getElementById('dark-mode-btn');
+if (darkModeBtn) {
+  if (localStorage.getItem('darkMode') === 'true') {
+    document.body.classList.add('dark-mode');
+    darkModeBtn.textContent = '☀️';
+  }
+  darkModeBtn.addEventListener('click', function() {
+    var isDark = document.body.classList.toggle('dark-mode');
+    darkModeBtn.textContent = isDark ? '☀️' : '🌙';
+    localStorage.setItem('darkMode', isDark);
+  });
+}
+
 sendBtn.addEventListener('click', sendMessage);
 
 userInput.addEventListener('keydown', function(e) {

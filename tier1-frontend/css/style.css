@@ -462,4 +462,25 @@ a:hover { text-decoration: underline; }
 .toast { position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#2C3E50;color:#fff;padding:8px 18px;border-radius:20px;font-size:13px;font-family:Poppins,sans-serif;z-index:999;opacity:1;transition:opacity 0.4s;pointer-events:none; }
 
 
+body.dark-mode {
+  --primary:     #00C9B8;
+  --primary-dark:#00B4A6;
+  --bg:          #1A1A2E;
+  --white:       #16213E;
+  --text:        #E0E0E0;
+  --text-muted:  #9E9E9E;
+  --border:      #2A2A4A;
+  --shadow:      0 2px 12px rgba(0,0,0,0.3);
+  --shadow-md:   0 4px 20px rgba(0,0,0,0.4);
+}
+body.dark-mode .header { background: #16213E; }
+body.dark-mode .sidebar { background: #16213E; }
+body.dark-mode .bubble { background: #16213E; }
+body.dark-mode .message.bot .bubble { background: #1E2A45; border-color: #2A2A4A; }
+body.dark-mode .input-area { background: #16213E; }
+body.dark-mode .session-item.active { background: #0F3460; }
+body.dark-mode .result-card { background: #1E2A45; }
+body.dark-mode .result-card.green { background: #0D2B1D; }
+body.dark-mode .result-card.yellow { background: #2B2000; }
+body.dark-mode .result-card.red { background: #2B0D0D; }
 

@@ -256,7 +256,7 @@ if (!empty($state['needs_memory_confirm'])) {
 }
 
 // User confirms memory figures are correct - proceed to active
-if (preg_match('/^(yes|yep|yeah|correct|they are correct|yes correct|thats correct|looks correct|looks good|right|thats right|same|use these|yes use|confirm)/i', $lower) && $state['step'] === 'active' && !empty($state['income'])) {
+if (preg_match('/^(yes|yep|yeah|correct|all correct|they are correct|yes correct|thats correct|looks correct|looks good|right|thats right|same|use these|yes use|confirm|all good|sounds good|perfect|that is correct)/i', $lower) && $state['step'] === 'active' && !empty($state['income'])) {
   $item_hint = !empty($state['active_goal']['name']) ? 'How much does the '.$state['active_goal']['name'].' cost?' : 'What would you like to check? Tell me the item and the price.';
   respond($db,$session_id,$state,'Great - '.$item_hint,null,['Other']);
 }
@@ -388,6 +388,36 @@ if ($loan_mentioned && !$action_taken) {
   }
 }
 
+// Savings deadline calculator - "save for X by December 2026"
+$deadline_match = preg_match('/by\s+(?:(\d{1,2})[\/\-](\d{4})|(\w+)\s+(\d{4})|(\d{4}))/i', $message, $dm);
+if ($deadline_match && !empty($state['active_goal']['cost']) && !empty($state['income']) && !$action_taken) {
+  $target_date = null;
+  if (!empty($dm[3]) && !empty($dm[4])) {
+    // "by December 2026"
+    $target_date = date_create($dm[3] . ' ' . $dm[4]);
+  } elseif (!empty($dm[1]) && !empty($dm[2])) {
+    // "by 12/2026"
+    $target_date = date_create($dm[2] . '-' . $dm[1] . '-01');
+  } elseif (!empty($dm[5])) {
+    // "by 2026"
+    $target_date = date_create($dm[5] . '-12-01');
+  }
+  if ($target_date) {
+    $now           = new DateTime();
+    $diff          = $now->diff($target_date);
+    $months_left   = ($diff->y * 12) + $diff->m;
+    if ($months_left > 0) {
+      $ag        = $state['active_goal'];
+      $remaining = max(0, $ag['cost'] - ($state['savings'] ?? 0));
+      $needed    = $months_left > 0 ? ceil($remaining / $months_left) : $remaining;
+      $surplus   = ($state['income'] ?? 0) - ($state['expenses'] ?? 0);
+      $feasible  = $needed <= $surplus;
+      $system_results['deadline_calc'] = 'To afford '.$ag['name'].' (£'.number_format($ag['cost'],2).') by '.date_format($target_date,'F Y').': you need to save £'.number_format($needed,2).'/month for '.$months_left.' months. Your current surplus is £'.number_format($surplus,2).'/month. '.($feasible ? 'This is achievable.' : 'This exceeds your surplus by £'.number_format($needed-$surplus,2).'/month - consider a longer timeline or reducing expenses.');
+      $action_taken = true;
+    }
+  }
+}
+
 if ((in_array('custom_savings_calc',$intents) || in_array('saving_time',$intents)) && !$action_taken && !$is_extra_saving) {
   $ag = $state['active_goal'] ?? null;
   if ($ag) {
@@ -516,6 +546,10 @@ if (!empty($system_results['loan_monthly_payment']) && $loan_mentioned) {
 
 if (!empty($system_results['saving_timeline']) && !preg_match('/\d+ month|\d+ year|already there/i', $bot_reply)) {
   $bot_reply .= "\n\n".$system_results['saving_timeline'].'.';
+}
+
+if (!empty($system_results['deadline_calc']) && strpos($bot_reply, 'month') === false) {
+  $bot_reply .= "\n\n".$system_results['deadline_calc'];
 }
 
 if (!empty($system_results['updated_goal_timeline']) && !preg_match('/\d+ month|\d+ year|already there/i', $bot_reply)) {

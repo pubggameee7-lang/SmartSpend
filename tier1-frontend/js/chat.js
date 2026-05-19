@@ -58,7 +58,7 @@ async function loadSessions() {
     // PROJECTS section
     // PROJECTS - collapsed header like archive
     var projHeader = document.createElement('div');
-    projHeader.style.cssText = 'font-size:14px;color:#4A5568;padding:4px 4px 2px;font-weight:600;letter-spacing:0.5px;cursor:pointer;user-select:none;display:flex;align-items:center;justify-content:space-between;';
+    projHeader.className = 'sidebar-section-label sidebar-section-row';
     var projToggleSpan = document.createElement('span');
     projToggleSpan.textContent = '\u25b8 PROJECTS';
     var addProjBtn = document.createElement('button');
@@ -147,7 +147,7 @@ async function loadSessions() {
     var archData = await archRes.json();
     if (archData.success && archData.sessions.length > 0) {
       var archHeader = document.createElement('div');
-      archHeader.style.cssText = 'font-size:14px;color:#4A5568;padding:4px 4px 2px;font-weight:600;letter-spacing:0.5px;cursor:pointer;user-select:none;';
+      archHeader.className = 'sidebar-section-label';
       archHeader.textContent = '\u25b8 Archived';
       var archList = document.createElement('div');
       archList.style.cssText = 'display:none;flex-direction:column;gap:4px;';
@@ -187,8 +187,8 @@ async function loadSessions() {
     var res  = await fetch(`${API_BASE}/history.php?action=sessions`);
     var data = await res.json();
 
-   var chatsLabel = document.createElement('div');
-    chatsLabel.style.cssText = 'font-size:14px;color:#4A5568;padding:8px 4px 2px;font-weight:600;letter-spacing:0.5px;';
+    var chatsLabel = document.createElement('div');
+    chatsLabel.className = 'sidebar-section-label';
     chatsLabel.textContent = 'CHATS';
     sessionList.appendChild(chatsLabel);
 
@@ -643,6 +643,7 @@ function exportResultPDF(calc) {
 function addMessage(role, content, calculation = null) {
   const welcome = chatBox.querySelector('.welcome-msg');
   if (welcome) welcome.remove();
+  if (calculation && calculation.risk_level === 'green') launchConfetti();
 
   const wrap     = document.createElement('div');
   wrap.className = `message ${role}`;
@@ -683,6 +684,24 @@ function addMessage(role, content, calculation = null) {
   wrap.appendChild(bubble);
   chatBox.appendChild(wrap);
   chatBox.scrollTop = chatBox.scrollHeight;
+}
+
+function launchConfetti() {
+  var colours = ['#00B4A6','#27AE60','#F39C12','#E0F2F1','#ffffff'];
+  for (var i = 0; i < 80; i++) {
+    var el = document.createElement('div');
+    el.style.cssText = 'position:fixed;top:-10px;width:8px;height:8px;border-radius:2px;opacity:1;z-index:9999;pointer-events:none;';
+    el.style.background = colours[Math.floor(Math.random() * colours.length)];
+    el.style.left = Math.random() * 100 + 'vw';
+    el.style.transform = 'rotate(' + Math.random() * 360 + 'deg)';
+    document.body.appendChild(el);
+    var duration = 1500 + Math.random() * 1000;
+    var drift = (Math.random() - 0.5) * 200;
+    el.animate([
+      { top: '-10px', opacity: 1, transform: 'rotate(0deg) translateX(0)' },
+      { top: '110vh', opacity: 0, transform: 'rotate(' + (Math.random()*720) + 'deg) translateX(' + drift + 'px)' }
+    ], { duration: duration, easing: 'ease-in', fill: 'forwards' }).onfinish = function() { el.remove(); };
+  }
 }
 
 function buildResultCard(calc) {
@@ -907,10 +926,7 @@ newSessionBtn.addEventListener('click', function() {
 
 
 
-
-
-
-// Simple title search in sidebar
+// Search - simple title filter
 var searchInput = document.getElementById('session-search');
 if (searchInput) {
   searchInput.addEventListener('input', function() {
@@ -922,103 +938,9 @@ if (searchInput) {
       folder.style.display = (!q || folder.textContent.toLowerCase().includes(q)) ? '' : 'none';
     });
   });
-  searchInput.addEventListener('focus', function() {
-    searchInput.blur();
-    openSearchModal();
-  });
 }
 
-// Full text search modal
-var searchModal = document.getElementById('search-modal');
-var searchModalInput = document.getElementById('search-modal-input');
-var searchModalResults = document.getElementById('search-modal-results');
-var searchModalClose = document.getElementById('search-modal-close');
-var modalTimer = null;
-
-function openSearchModal() {
-  if (!searchModal) return;
-  searchModal.style.display = 'flex';
-  if (searchModalInput) { searchModalInput.value = ''; searchModalInput.focus(); }
-  if (searchModalResults) searchModalResults.innerHTML = '';
-}
-
-function closeSearchModal() {
-  if (!searchModal) return;
-  searchModal.style.display = 'none';
-  if (searchModalInput) searchModalInput.value = '';
-  if (searchModalResults) searchModalResults.innerHTML = '';
-}
-
-if (searchModalClose) searchModalClose.addEventListener('click', closeSearchModal);
-if (searchModal) searchModal.addEventListener('click', function(e) { if (e.target === searchModal) closeSearchModal(); });
-
-
-
-document.addEventListener('keydown', function(e) {
-  if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); openSearchModal(); }
-  if (e.key === 'Escape') { closeSearchModal(); }
-});
-
-if (searchModalInput) {
-  searchModalInput.addEventListener('input', function() {
-    var q = searchModalInput.value.trim();
-    clearTimeout(modalTimer);
-    if (!searchModalResults) return;
-    searchModalResults.innerHTML = '';
-    if (!q) return;
-    searchModalResults.innerHTML = '<div style="padding:16px;color:var(--text-muted);font-size:13px;text-align:center;">Searching...</div>';
-    modalTimer = setTimeout(async function() {
-      try {
-        var res = await fetch(API_BASE + '/history.php?action=search&q=' + encodeURIComponent(q));
-        var data = await res.json();
-        searchModalResults.innerHTML = '';
-        if (!data.success || !data.results.length) {
-          searchModalResults.innerHTML = '<div style="padding:16px;color:var(--text-muted);font-size:13px;text-align:center;">No results for "' + q + '"</div>';
-          return;
-        }
-        var seen = {};
-        data.results.forEach(function(r) {
-          if (seen[r.session_id]) return;
-          seen[r.session_id] = true;
-          var row = document.createElement('div');
-          row.style.cssText = 'padding:12px 16px;cursor:pointer;border-bottom:1px solid var(--border);';
-          row.onmouseover = function() { row.style.background = 'var(--bg)'; };
-          row.onmouseout  = function() { row.style.background = ''; };
-          var titleEl = document.createElement('div');
-          titleEl.style.cssText = 'font-weight:600;font-size:13px;color:var(--text);margin-bottom:4px;';
-          titleEl.textContent = r.session_title;
-          var snippetEl = document.createElement('div');
-          snippetEl.style.cssText = 'font-size:12px;color:var(--text-muted);line-height:1.5;';
-          var safe = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          var highlighted = r.snippet.replace(new RegExp('(' + safe + ')', 'gi'), '<mark style="background:#E0F2F1;color:var(--primary);border-radius:2px;padding:0 2px;">$1</mark>');
-          snippetEl.innerHTML = highlighted;
-          row.appendChild(titleEl);
-          row.appendChild(snippetEl);
-          row.addEventListener('click', function() {
-            closeSearchModal();
-            var found = false;
-            document.querySelectorAll('.session-item').forEach(function(item) {
-              if (item.dataset.sessionId == r.session_id) { item.click(); found = true; }
-            });
-            if (!found) { currentSessionId = r.session_id; loadSessionMessages(r.session_id, document.createElement('div')); }
-          });
-          searchModalResults.appendChild(row);
-        });
-        var count = document.createElement('div');
-        count.style.cssText = 'padding:8px 16px;font-size:11px;color:var(--text-muted);background:var(--bg);';
-        count.textContent = Object.keys(seen).length + ' chat(s) found';
-        searchModalResults.appendChild(count);
-      } catch(err) {
-        searchModalResults.innerHTML = '<div style="padding:16px;color:var(--text-muted);font-size:13px;">Search failed.</div>';
-      }   
-    }, 400);
-  });
-}
-
-
-
-
- if (logoutBtn) {
+if (logoutBtn) {
   logoutBtn.addEventListener('click', handleLogout);
 }
 
@@ -1039,4 +961,4 @@ if (searchModalInput) {
       await loadSessionMessages(data.sessions[0].id, firstItem);
     }
   }
-})(); 
+})();

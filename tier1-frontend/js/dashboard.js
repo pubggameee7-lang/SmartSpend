@@ -472,10 +472,23 @@ async function loadSavingsGoals() {
       var feasible = g.monthly_needed <= g.surplus;
       var statusColour = g.months_left === 0 ? 'var(--risk-red)' : (feasible ? 'var(--risk-green)' : 'var(--risk-amber)');
 
-      var statusMsg = g.months_left === 0
-        ? 'Deadline has passed'
-        : 'Saving £' + g.monthly_needed.toFixed(2) + '/month for ' + g.months_left + ' month' + (g.months_left > 1 ? 's' : '') + ' to reach your goal. ' +
-          (feasible ? '✓ Achievable from your £' + g.surplus.toFixed(2) + ' monthly surplus.' : '⚠ Exceeds surplus by £' + (g.monthly_needed - g.surplus).toFixed(2) + '/month.');
+      var statusMsg = '';
+      if (g.months_left === 0) {
+        statusMsg = 'Deadline has passed.';
+      } else if (feasible) {
+        statusMsg = 'Saving £' + g.monthly_needed.toFixed(2) + '/month for ' + g.months_left + ' month' + (g.months_left > 1 ? 's' : '') + ' to reach your goal. ✓ Achievable from your £' + g.surplus.toFixed(2) + ' surplus.';
+      } else {
+        // Calculate how long it would take at current surplus
+        var naturalMonths = g.surplus > 0 ? Math.ceil(g.remaining / g.surplus) : 0;
+        var naturalDate = '';
+        if (naturalMonths > 0) {
+          var nd = new Date();
+          nd.setMonth(nd.getMonth() + naturalMonths);
+          naturalDate = nd.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+        }
+        statusMsg = '⚠ To hit your deadline you need £' + g.monthly_needed.toFixed(2) + '/month but your surplus is £' + g.surplus.toFixed(2) + '/month. ' +
+          (naturalMonths > 0 ? 'At your current surplus you will reach this goal in ' + naturalMonths + ' months (' + naturalDate + ').' : 'Increase your surplus to save faster.');
+      }
 
       card.innerHTML =
         // Header

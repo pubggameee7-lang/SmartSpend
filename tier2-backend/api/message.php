@@ -81,8 +81,11 @@ $history = array_values(array_filter($history_raw, function($m) use ($raw_messag
 function respond(PDO $db, int $sid, array $state, string $reply, ?array $calc, array $qr, ?array $comparison_calc = null): void {
   $stmt = $db->prepare('INSERT INTO conversation_state (session_id, state) VALUES (?, ?) ON DUPLICATE KEY UPDATE state=VALUES(state), updated_at=NOW()');
   $stmt->execute([$sid, json_encode($state)]);
+  // Save comparison_calc merged into calculation for persistence
+  $save_calc = $calc;
+  if ($comparison_calc) $save_calc = array_merge($calc ?? [], ['comparison_calc' => $comparison_calc]);
   $stmt = $db->prepare('INSERT INTO messages (session_id, role, content, calculation) VALUES (?, ?, ?, ?)');
-  $stmt->execute([$sid, 'bot', $reply, $calc ? json_encode($calc) : null]);
+  $stmt->execute([$sid, 'bot', $reply, $save_calc ? json_encode($save_calc) : null]);
   echo json_encode(['success'=>true,'bot_reply'=>$reply,'calculation'=>$calc,'quick_replies'=>$qr,'step'=>$state['step'],'comparison_calc'=>$comparison_calc]);
   exit;
 }
@@ -138,7 +141,7 @@ $is_unrelated          = $ix['is_unrelated'] ?? false;
 // Yes-confirm must run BEFORE correction check
 if (preg_match('/^(yes|yep|yeah|correct|all correct|they are correct|yes correct|thats correct|looks correct|looks good|right|thats right|same|use these|yes use|confirm|all good|sounds good|perfect|that is correct)/i', $lower) && $state['step'] === 'active' && !empty($state['income'])) {
   $item_hint = !empty($state['active_goal']['name']) ? 'How much does the '.$state['active_goal']['name'].' cost?' : 'What would you like to check? Tell me the item and the price.';
-  respond($db,$session_id,$state,'Great - '.$item_hint,null,[]);
+  respond($db,$session_id,$state,'Great - '.$item_hint,null,['Other']);
 }
 
 $correction_applicable = false;
@@ -583,7 +586,9 @@ if (!empty($system_results['affordability'])) {
     elseif ($currRisk < $prevRisk) $winner = $r['item_name'];
     elseif ($prev['calc']['months_to_save'] <= $r['months_to_save']) $winner = $prev['item_name'];
     else $winner = $r['item_name'];
-    $bot_reply = "Here is your side by side comparison:";
+    $bot_reply = "Here is your side by side comparison:\n\n".
+      "📦 ".$prev['item_name']." — £".number_format($prev['item_price'],2)." · ".strtoupper($prev['risk_level'])." risk · ".($prev['calc']['months_to_save']===0?'Already affordable':$prev['calc']['months_to_save'].' months to save')."\n".
+      "📦 ".$r['item_name']." — £".number_format($r['item_price'],2)." · ".strtoupper($r['risk_level'])." risk · ".($r['months_to_save']===0?'Already affordable':$r['months_to_save'].' months to save');
   } else {
     $bot_reply = $label.' - here is your result for '.$r['item_name'].".\n\n".getAIExplanation($ai_ctx,$r['risk_level']);
   }

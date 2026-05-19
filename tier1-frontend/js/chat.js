@@ -539,7 +539,24 @@ async function loadSessionMessages(sessionId, el) {
     const data = await res.json();
     clearChat();
     if (data.success && data.messages.length > 0) {
-      data.messages.forEach(msg => addMessage(msg.role, msg.content, msg.calculation || null));
+      data.messages.forEach(function(msg) {
+        var calc = msg.calculation || null;
+        var compCalc = null;
+        if (calc && calc.comparison_calc) {
+          compCalc = calc.comparison_calc;
+          // Remove comparison_calc from main calc so result card renders correctly
+          calc = Object.assign({}, calc);
+          delete calc.comparison_calc;
+        }
+        if (compCalc) {
+          addMessage(msg.role, msg.content, calc);
+          addMessage(msg.role, 'Here is your side by side comparison:', null);
+          var compWrap = chatBox.querySelector('.message.bot:last-child .bubble');
+          if (compWrap) compWrap.appendChild(buildComparisonCard(compCalc, calc));
+        } else {
+          addMessage(msg.role, msg.content, calc);
+        }
+      });
     } else {
       showWelcome();
     }
@@ -940,9 +957,11 @@ async function sendMessage() {
           if (bd.success && bd.budget) lastBudgetSnapshot = bd.budget;
         });
       }
-      if (data.calculation && data.comparison_calc) {
-        // Show comparison only - text + side by side cards
-        addMessage('bot', data.bot_reply, null);
+      if (data.comparison_calc) {
+        // Show individual result card first
+        addMessage('bot', data.bot_reply, data.calculation || null);
+        // Then comparison side by side as separate message
+        addMessage('bot', 'Here is your side by side comparison:', null);
         var compWrap = chatBox.querySelector('.message.bot:last-child .bubble');
         if (compWrap) compWrap.appendChild(buildComparisonCard(data.comparison_calc, data.calculation));
       } else {

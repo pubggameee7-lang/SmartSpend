@@ -549,7 +549,10 @@ async function loadSessionMessages(sessionId, el) {
           delete calc.comparison_calc;
         }
         if (compCalc) {
-          addMessage(msg.role, msg.content, calc);
+          // Show individual full result card first
+          var riskLabel2 = calc && calc.risk_level === 'green' ? 'Good news' : calc && calc.risk_level === 'yellow' ? 'Heads up' : 'Warning';
+          addMessage(msg.role, riskLabel2 + ' - here is your result for ' + (calc ? calc.item_name : '') + '.', calc);
+          // Then comparison side by side
           addMessage(msg.role, 'Here is your side by side comparison:', null);
           var compWrap = chatBox.querySelector('.message.bot:last-child .bubble');
           if (compWrap) compWrap.appendChild(buildComparisonCard(compCalc, calc));
@@ -1057,13 +1060,8 @@ if (logoutBtn) {
   var data = await res.json();
 
   if (!data.success || data.sessions.length === 0) {
-    await createSession();
+    showWelcome();
   } else {
-    currentSessionId = data.sessions[0].id;
-    var firstItem    = sessionList.querySelector('.session-item');
-    if (firstItem) {
-      firstItem.classList.add('active');
-      await loadSessionMessages(data.sessions[0].id, firstItem);
-    }
+    showWelcome();
   }
 })();

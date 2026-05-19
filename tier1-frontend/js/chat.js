@@ -941,10 +941,7 @@ async function sendMessage() {
         });
       }
       if (data.calculation && data.comparison_calc) {
-        // Show individual result first
-        var riskLabel = data.calculation.risk_level === 'green' ? 'Good news' : data.calculation.risk_level === 'yellow' ? 'Heads up' : 'Warning';
-        addMessage('bot', riskLabel + ' - here is your result for ' + data.calculation.item_name + '.', data.calculation);
-        // Then show comparison as separate message
+        // Show comparison only - text + side by side cards
         addMessage('bot', data.bot_reply, null);
         var compWrap = chatBox.querySelector('.message.bot:last-child .bubble');
         if (compWrap) compWrap.appendChild(buildComparisonCard(data.comparison_calc, data.calculation));

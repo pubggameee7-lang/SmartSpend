@@ -138,7 +138,7 @@ $is_unrelated          = $ix['is_unrelated'] ?? false;
 // Yes-confirm must run BEFORE correction check
 if (preg_match('/^(yes|yep|yeah|correct|all correct|they are correct|yes correct|thats correct|looks correct|looks good|right|thats right|same|use these|yes use|confirm|all good|sounds good|perfect|that is correct)/i', $lower) && $state['step'] === 'active' && !empty($state['income'])) {
   $item_hint = !empty($state['active_goal']['name']) ? 'How much does the '.$state['active_goal']['name'].' cost?' : 'What would you like to check? Tell me the item and the price.';
-  respond($db,$session_id,$state,'Great - '.$item_hint,null,['Other']);
+  respond($db,$session_id,$state,'Great - '.$item_hint,null,[]);
 }
 
 $correction_applicable = false;
@@ -277,7 +277,7 @@ if (preg_match('/^(yes|yep|yeah|correct|all correct|they are correct|yes correct
 if (preg_match('/compare|something else|alternative|versus|vs/i', $message) && $state['step'] === 'active' && !empty($state['checks']) && !$num) {
   $last = $state['checks'][count($state['checks'])-1];
   $state['comparing'] = true;
-  respond($db,$session_id,$state,'Sure - what item would you like to compare with the '.$last['item_name'].'? Tell me the item name and price.',null,['Other']);
+  respond($db,$session_id,$state,'Sure - what item would you like to compare with the '.$last['item_name'].'? Tell me the item name and price.',null,[]);
 }
 
 // User wants to update all figures - soft reset to income step
@@ -583,10 +583,7 @@ if (!empty($system_results['affordability'])) {
     elseif ($currRisk < $prevRisk) $winner = $r['item_name'];
     elseif ($prev['calc']['months_to_save'] <= $r['months_to_save']) $winner = $prev['item_name'];
     else $winner = $r['item_name'];
-    $bot_reply = "Here is your comparison:\n\n".
-      "📦 ".$prev['item_name']." — £".number_format($prev['item_price'],2)." · ".strtoupper($prev['risk_level'])." risk · ".($prev['calc']['months_to_save']===0?'Already affordable':$prev['calc']['months_to_save'].' months to save')."\n".
-      "📦 ".$r['item_name']." — £".number_format($r['item_price'],2)." · ".strtoupper($r['risk_level'])." risk · ".($r['months_to_save']===0?'Already affordable':$r['months_to_save'].' months to save')."\n\n".
-      "✓ Better financial choice: ".$winner;
+    $bot_reply = "Here is your side by side comparison:";
   } else {
     $bot_reply = $label.' - here is your result for '.$r['item_name'].".\n\n".getAIExplanation($ai_ctx,$r['risk_level']);
   }

@@ -78,12 +78,12 @@ $history = array_values(array_filter($history_raw, function($m) use ($raw_messag
   return true;
 }));
 
-function respond(PDO $db, int $sid, array $state, string $reply, ?array $calc, array $qr): void {
+function respond(PDO $db, int $sid, array $state, string $reply, ?array $calc, array $qr, ?array $comparison_calc = null): void {
   $stmt = $db->prepare('INSERT INTO conversation_state (session_id, state) VALUES (?, ?) ON DUPLICATE KEY UPDATE state=VALUES(state), updated_at=NOW()');
   $stmt->execute([$sid, json_encode($state)]);
   $stmt = $db->prepare('INSERT INTO messages (session_id, role, content, calculation) VALUES (?, ?, ?, ?)');
   $stmt->execute([$sid, 'bot', $reply, $calc ? json_encode($calc) : null]);
-  echo json_encode(['success'=>true,'bot_reply'=>$reply,'calculation'=>$calc,'quick_replies'=>$qr,'step'=>$state['step']]);
+  echo json_encode(['success'=>true,'bot_reply'=>$reply,'calculation'=>$calc,'quick_replies'=>$qr,'step'=>$state['step'],'comparison_calc'=>$comparison_calc]);
   exit;
 }
 
@@ -274,8 +274,9 @@ if (preg_match('/^(yes|yep|yeah|correct|all correct|they are correct|yes correct
 }
 
 // Compare with something else - ask for a different item
-if (preg_match('/compare|something else|alternative|versus|vs/i', $message) && $state['step'] === 'active' && !empty($state['checks'])) {
+if (preg_match('/compare|something else|alternative|versus|vs/i', $message) && $state['step'] === 'active' && !empty($state['checks']) && !$num) {
   $last = $state['checks'][count($state['checks'])-1];
+  $state['comparing'] = true;
   respond($db,$session_id,$state,'Sure - what item would you like to compare with the '.$last['item_name'].'? Tell me the item name and price.',null,['Other']);
 }
 
@@ -478,6 +479,13 @@ if (!empty($state['income']) && !empty($state['expenses']) && isset($state['savi
   $new_cost = null;
   $new_type = 'one-time';
 
+  // Fallback - parse item name directly if LLM missed it
+  if (!$goal_name_hint && $num && $num > 50 && !$loan_mentioned && !$expense_change && !$sub_mentioned && !$is_extra_saving) {
+    $stripped = preg_replace('/' . preg_quote(number_format($num,0,'.',','), '/') . '|£[\d,]+k?|\d+k?/i', '', $message);
+    $stripped = trim(preg_replace('/\s+/', ' ', $stripped));
+    if (strlen($stripped) > 2) $goal_name_hint = $stripped;
+  }
+
   if ($goal_name_hint && $num && $num > 50 && !$loan_mentioned && !$expense_change && !$sub_mentioned && !$is_extra_saving) {
     $new_name = $goal_name_hint;
     $new_cost = $num;
@@ -548,11 +556,30 @@ if ($show_again && !empty($state['checks'])) {
 
 $bot_reply = generateReply($message, $state, $history, $system_results);
 
+$comparison_calc = null;
 if (!empty($system_results['affordability'])) {
   $r      = $calculation;
   $label  = $r['risk_level']==='green' ? 'Good news' : ($r['risk_level']==='yellow' ? 'Heads up' : 'Warning');
   $ai_ctx = "Income: £{$state['income']}. Expenses: £{$state['expenses']}. Savings: £{$state['savings']}. Item: {$r['item_name']} at £".number_format($r['item_price'],2)." ({$r['item_type']}). Surplus: £{$r['surplus']}. Risk: {$r['risk_level']}. Months: {$r['months_to_save']}.";
-  $bot_reply = $label.' - here is your result for '.$r['item_name'].".\n\n".getAIExplanation($ai_ctx,$r['risk_level']);
+
+  if (!empty($state['comparing']) && count($state['checks']) >= 2) {
+    $state['comparing'] = false;
+    $prev = $state['checks'][count($state['checks'])-2];
+    $comparison_calc = array_merge($prev['calc'], ['item_name'=>$prev['item_name'],'item_price'=>$prev['item_price'],'item_type'=>$prev['item_type']]);
+    $riskOrder = ['green'=>0,'yellow'=>1,'red'=>2];
+    $prevRisk = $riskOrder[$prev['risk_level']] ?? 2;
+    $currRisk = $riskOrder[$r['risk_level']] ?? 2;
+    if ($prevRisk < $currRisk) $winner = $prev['item_name'];
+    elseif ($currRisk < $prevRisk) $winner = $r['item_name'];
+    elseif ($prev['calc']['months_to_save'] <= $r['months_to_save']) $winner = $prev['item_name'];
+    else $winner = $r['item_name'];
+    $bot_reply = "Here is your comparison:\n\n".
+      "📦 ".$prev['item_name']." — £".number_format($prev['item_price'],2)." · ".strtoupper($prev['risk_level'])." risk · ".($prev['calc']['months_to_save']===0?'Already affordable':$prev['calc']['months_to_save'].' months to save')."\n".
+      "📦 ".$r['item_name']." — £".number_format($r['item_price'],2)." · ".strtoupper($r['risk_level'])." risk · ".($r['months_to_save']===0?'Already affordable':$r['months_to_save'].' months to save')."\n\n".
+      "✓ Better financial choice: ".$winner;
+  } else {
+    $bot_reply = $label.' - here is your result for '.$r['item_name'].".\n\n".getAIExplanation($ai_ctx,$r['risk_level']);
+  }
 }
 
 if (!empty($system_results['loan_monthly_payment']) && $loan_mentioned) {
@@ -585,4 +612,4 @@ if (!$calculation && $missing) {
   elseif ($missing==='savings')  $quick_replies = ['£0','£500','£1000','£2000','Other'];
 }
 
-respond($db,$session_id,$state,$bot_reply,$calculation,$quick_replies);
+respond($db,$session_id,$state,$bot_reply,$calculation,$quick_replies,$comparison_calc ?? null);

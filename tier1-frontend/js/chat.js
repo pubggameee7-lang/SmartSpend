@@ -704,6 +704,70 @@ function launchConfetti() {
   }
 }
 
+function buildComparisonCard(calc1, calc2) {
+  var wrap = document.createElement('div');
+  wrap.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;';
+
+  [calc1, calc2].forEach(function(c, idx) {
+    var col = document.createElement('div');
+    col.style.cssText = 'border-radius:var(--radius-sm);padding:14px;border:1.5px solid ' +
+      (c.risk_level==='green' ? 'var(--risk-green);background:#F0FBF4;' :
+       c.risk_level==='yellow' ? 'var(--risk-amber);background:#FEF9EE;' :
+       'var(--risk-red);background:#FEF0EE;');
+
+    var badge = document.createElement('div');
+    badge.style.cssText = 'display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;margin-bottom:8px;' +
+      (c.risk_level==='green' ? 'background:#D4EFDF;color:var(--risk-green);' :
+       c.risk_level==='yellow' ? 'background:#FDEBD0;color:var(--risk-amber);' :
+       'background:#FADBD8;color:var(--risk-red);');
+    badge.textContent = c.risk_level==='green' ? 'LOW RISK' : c.risk_level==='yellow' ? 'MODERATE RISK' : 'HIGH RISK';
+
+    var name = document.createElement('div');
+    name.style.cssText = 'font-weight:600;font-size:13px;margin-bottom:6px;';
+    name.textContent = c.item_name;
+
+    var rows = [
+      ['Price', '£' + Number(c.item_price).toFixed(2)],
+      ['Surplus', '£' + Number(c.surplus).toFixed(2) + '/mo'],
+      ['Time to save', c.months_to_save === 0 ? 'Already there' : c.months_to_save + ' months'],
+      ['Health score', c.health_score + '/100'],
+    ];
+
+    var table = document.createElement('div');
+    rows.forEach(function(r) {
+      var row = document.createElement('div');
+      row.style.cssText = 'display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:1px solid rgba(0,0,0,0.06);';
+      row.innerHTML = '<span style="color:var(--text-muted);">' + r[0] + '</span><span style="font-weight:500;">' + r[1] + '</span>';
+      table.appendChild(row);
+    });
+
+    col.appendChild(badge);
+    col.appendChild(name);
+    col.appendChild(table);
+    wrap.appendChild(col);
+  });
+
+  // Winner banner
+  var banner = document.createElement('div');
+  banner.style.cssText = 'grid-column:1/-1;text-align:center;font-size:13px;font-weight:600;padding:8px;background:var(--bg);border-radius:var(--radius-sm);border:1.5px solid var(--border);';
+  var riskOrder = {green:0, yellow:1, red:2};
+  if (riskOrder[calc1.risk_level] < riskOrder[calc2.risk_level]) {
+    banner.textContent = '✓ ' + calc1.item_name + ' is the better financial choice';
+    banner.style.color = 'var(--risk-green)';
+  } else if (riskOrder[calc2.risk_level] < riskOrder[calc1.risk_level]) {
+    banner.textContent = '✓ ' + calc2.item_name + ' is the better financial choice';
+    banner.style.color = 'var(--risk-green)';
+  } else if (calc1.months_to_save <= calc2.months_to_save) {
+    banner.textContent = '✓ ' + calc1.item_name + ' is achievable sooner';
+    banner.style.color = 'var(--primary)';
+  } else {
+    banner.textContent = '✓ ' + calc2.item_name + ' is achievable sooner';
+    banner.style.color = 'var(--primary)';
+  }
+  wrap.appendChild(banner);
+  return wrap;
+}
+
 function buildResultCard(calc) {
   const risk     = calc.risk_level;
   const card     = document.createElement('div');
@@ -876,7 +940,17 @@ async function sendMessage() {
           if (bd.success && bd.budget) lastBudgetSnapshot = bd.budget;
         });
       }
-      addMessage('bot', data.bot_reply, data.calculation || null);
+      if (data.calculation && data.comparison_calc) {
+        // Show individual result first
+        var riskLabel = data.calculation.risk_level === 'green' ? 'Good news' : data.calculation.risk_level === 'yellow' ? 'Heads up' : 'Warning';
+        addMessage('bot', riskLabel + ' - here is your result for ' + data.calculation.item_name + '.', data.calculation);
+        // Then show comparison as separate message
+        addMessage('bot', data.bot_reply, null);
+        var compWrap = chatBox.querySelector('.message.bot:last-child .bubble');
+        if (compWrap) compWrap.appendChild(buildComparisonCard(data.comparison_calc, data.calculation));
+      } else {
+        addMessage('bot', data.bot_reply, data.calculation || null);
+      }
       renderQuickReplies(data.quick_replies || []);
     } else {
       addMessage('bot', data.error || 'Something went wrong. Please try again.');

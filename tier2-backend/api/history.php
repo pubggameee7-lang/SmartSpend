@@ -257,7 +257,7 @@ if ($method === 'GET') {
       $now      = new DateTime();
       $deadline = new DateTime($g['deadline']);
       $diff     = $now->diff($deadline);
-      $months_left = max(0, ($diff->y * 12) + $diff->m + ($diff->invert ? 0 : 0));
+      $months_left = max(0, ($diff->y * 12) + $diff->m + ($diff->d > 0 ? 1 : 0));
       if ($deadline < $now) $months_left = 0;
       $monthly_needed = $months_left > 0 ? ceil($remaining / $months_left) : $remaining;
       $pct = $g['target_amount'] > 0 ? round((floatval($g['current_savings']) / floatval($g['target_amount'])) * 100) : 0;

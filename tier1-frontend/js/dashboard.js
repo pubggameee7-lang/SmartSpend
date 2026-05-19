@@ -1,6 +1,6 @@
 const API_BASE = '../tier2-backend/api';
 
-// ── Elements ──────────────────────────────────────────────
+// Elements 
 const scoreNumber      = document.getElementById('score-number');
 const scoreTrend       = document.getElementById('score-trend');
 const scoreCircle      = document.getElementById('score-circle');
@@ -20,7 +20,7 @@ const itemsList        = document.getElementById('items-list');
 
 let scoreChart = null;
 
-// ── Spending personality engine ───────────────────────────
+// Spending personality engine
 function getPersonality(expenseRatio, savingsRatio) {
   if (expenseRatio === null) return null;
 
@@ -52,7 +52,7 @@ function getPersonality(expenseRatio, savingsRatio) {
   };
 }
 
-// ── Health score colour helper ────────────────────────────
+//  Health score colour helper 
 function applyScoreColour(score) {
   let colour;
   if (score >= 70)      colour = '#27AE60';
@@ -65,7 +65,7 @@ function applyScoreColour(score) {
   return colour;
 }
 
-// ── Draw trend chart ──────────────────────────────────────
+//  Draw trend chart 
 function drawChart(labels, scores) {
   const ctx = document.getElementById('scoreChart').getContext('2d');
 
@@ -131,7 +131,7 @@ function drawChart(labels, scores) {
   });
 }
 
-// ── Render goal progress bars ─────────────────────────────
+//  Render goal progress bars 
 function renderGoalProgress(assessments, lastBudget) {
   if (!assessments || assessments.length === 0) return;
   if (!lastBudget) return;
@@ -179,7 +179,7 @@ function renderGoalProgress(assessments, lastBudget) {
   goalCard.style.display = 'block';
 }
 
-// ── Render all items checked ──────────────────────────────
+//  Render all items checked 
 function renderItems(assessments) {
   if (!assessments || assessments.length === 0) {
     itemsList.innerHTML = '<p class="empty-msg">No items checked yet.</p>';
@@ -227,7 +227,7 @@ function renderItems(assessments) {
 }
 
 
-// ── Export PDF from dashboard ─────────────────────────────
+//  Export PDF from dashboard 
 function exportPDF(assessment, budget, personality) {
   var risk      = assessment.risk_level;
   var riskLabel = risk === 'green' ? 'LOW RISK' : risk === 'yellow' ? 'MODERATE RISK' : 'HIGH RISK';
@@ -295,7 +295,7 @@ function exportPDF(assessment, budget, personality) {
   win.document.close();
 }
 
-// ── Check auth ────────────────────────────────────────────
+//  Check auth 
 async function checkAuth() {
   try {
     const fd = new FormData();
@@ -311,7 +311,7 @@ async function checkAuth() {
   }
 }
 
-// ── Load health score + trend ─────────────────────────────
+//  Load health score + trend 
 async function loadHealthScore() {
   try {
     const res  = await fetch(`${API_BASE}/history.php?action=health_score`);
@@ -358,7 +358,7 @@ async function loadHealthScore() {
   }
 }
 
-// ── Load sessions ─────────────────────────────────────────
+//  Load sessions 
 async function loadSessions() {
   try {
     const res  = await fetch(`${API_BASE}/history.php?action=sessions`);
@@ -396,7 +396,7 @@ async function loadSessions() {
   }
 }
 
-// ── Load last assessment + all items ─────────────────────
+//  Load last assessment + all items 
 async function loadLastAssessment(sessionId) {
   try {
     const res  = await fetch(`${API_BASE}/history.php?action=all_assessments`);
@@ -427,7 +427,7 @@ async function loadLastAssessment(sessionId) {
   }
 }
 
-// ── Logout ────────────────────────────────────────────────
+//  Logout 
 if (logoutBtn) {
   logoutBtn.addEventListener('click', async () => {
     try {
@@ -440,7 +440,7 @@ if (logoutBtn) {
   });
 }
 
-// ── Init ──────────────────────────────────────────────────
+// Init 
 (async () => {
   const authed = await checkAuth();
   if (!authed) return;
@@ -448,7 +448,7 @@ if (logoutBtn) {
 })();
 
 
-// ── Savings Goal Tracker ─────────────────────────────────
+//  Savings Goal Tracker
 const API_BASE_DASH = '../tier2-backend/api';
 
 async function loadSavingsGoals() {
@@ -472,22 +472,25 @@ async function loadSavingsGoals() {
       var feasible = g.monthly_needed <= g.surplus;
       var statusColour = g.months_left === 0 ? 'var(--risk-red)' : (feasible ? 'var(--risk-green)' : 'var(--risk-amber)');
 
+      // Calculate natural months at current surplus
+      var naturalMonths = g.surplus > 0 ? Math.ceil(g.remaining / g.surplus) : 0;
+      var naturalDate = '';
+      if (naturalMonths > 0) {
+        var nd = new Date();
+        nd.setMonth(nd.getMonth() + naturalMonths);
+        naturalDate = nd.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+      }
+      var monthsOver = naturalMonths - g.months_left;
+
       var statusMsg = '';
       if (g.months_left === 0) {
         statusMsg = 'Deadline has passed.';
-      } else if (feasible) {
-        statusMsg = 'Saving £' + g.monthly_needed.toFixed(2) + '/month for ' + g.months_left + ' month' + (g.months_left > 1 ? 's' : '') + ' to reach your goal. ✓ Achievable from your £' + g.surplus.toFixed(2) + ' surplus.';
+      } else if (g.surplus <= 0) {
+        statusMsg = '⚠ No surplus available. Reduce expenses to start saving.';
+      } else if (naturalMonths <= g.months_left) {
+        statusMsg = '✓ Saving your full surplus of £' + g.surplus.toFixed(2) + '/month, you will reach your goal in ' + naturalMonths + ' month' + (naturalMonths > 1 ? 's' : '') + ' by ' + naturalDate + '.';
       } else {
-        // Calculate how long it would take at current surplus
-        var naturalMonths = g.surplus > 0 ? Math.ceil(g.remaining / g.surplus) : 0;
-        var naturalDate = '';
-        if (naturalMonths > 0) {
-          var nd = new Date();
-          nd.setMonth(nd.getMonth() + naturalMonths);
-          naturalDate = nd.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
-        }
-        statusMsg = '⚠ To hit your deadline you need £' + g.monthly_needed.toFixed(2) + '/month but your surplus is £' + g.surplus.toFixed(2) + '/month. ' +
-          (naturalMonths > 0 ? 'At your current surplus you will reach this goal in ' + naturalMonths + ' months (' + naturalDate + ').' : 'Increase your surplus to save faster.');
+        statusMsg = '⚠ Saving your full surplus of £' + g.surplus.toFixed(2) + '/month, you will reach your goal in ' + naturalMonths + ' months by ' + naturalDate + ' - ' + monthsOver + ' month' + (monthsOver > 1 ? 's' : '') + ' after your deadline.';
       }
 
       card.innerHTML =

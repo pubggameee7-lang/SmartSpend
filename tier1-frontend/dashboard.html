@@ -123,6 +123,18 @@
     </div>
   </header>
 
+  <!-- Confirm Delete Modal -->
+  <div id="confirm-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:1000;align-items:center;justify-content:center;">
+    <div style="background:var(--white);border-radius:var(--radius);box-shadow:var(--shadow-md);padding:28px;max-width:360px;width:90%;text-align:center;">
+      <div style="font-size:28px;margin-bottom:12px;">🗑️</div>
+      <div id="confirm-modal-msg" style="font-size:14px;color:var(--text);margin-bottom:20px;line-height:1.5;">Are you sure?</div>
+      <div style="display:flex;gap:10px;justify-content:center;">
+        <button id="confirm-modal-yes" class="btn-primary" style="background:var(--risk-red);border-color:var(--risk-red);">Delete</button>
+        <button id="confirm-modal-no" class="btn-outline">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <div class="dashboard-layout" id="dashboard-main" role="main">
 
     <!-- Spending Personality -->

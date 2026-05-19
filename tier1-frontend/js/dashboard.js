@@ -1,6 +1,6 @@
 const API_BASE = '../tier2-backend/api';
 
-// ── Elements ──────────────────────────────────────────────
+//  Elements 
 const scoreNumber      = document.getElementById('score-number');
 const scoreTrend       = document.getElementById('score-trend');
 const scoreCircle      = document.getElementById('score-circle');
@@ -20,7 +20,7 @@ const itemsList        = document.getElementById('items-list');
 
 let scoreChart = null;
 
-// ── Spending personality engine ───────────────────────────
+//  Spending personality engine 
 function getPersonality(expenseRatio, savingsRatio) {
   if (expenseRatio === null) return null;
 
@@ -52,7 +52,7 @@ function getPersonality(expenseRatio, savingsRatio) {
   };
 }
 
-// ── Health score colour helper ────────────────────────────
+//  Health score colour helper
 function applyScoreColour(score) {
   let colour;
   if (score >= 70)      colour = '#27AE60';
@@ -65,7 +65,7 @@ function applyScoreColour(score) {
   return colour;
 }
 
-// ── Draw trend chart ──────────────────────────────────────
+// Draw trend chart 
 function drawChart(labels, scores) {
   const ctx = document.getElementById('scoreChart').getContext('2d');
 
@@ -131,7 +131,7 @@ function drawChart(labels, scores) {
   });
 }
 
-// ── Render goal progress bars ─────────────────────────────
+//  Render goal progress bars 
 function renderGoalProgress(assessments, lastBudget) {
   if (!assessments || assessments.length === 0) return;
   if (!lastBudget) return;
@@ -179,7 +179,7 @@ function renderGoalProgress(assessments, lastBudget) {
   goalCard.style.display = 'block';
 }
 
-// ── Render all items checked ──────────────────────────────
+//  Render all items checked 
 function renderItems(assessments) {
   if (!assessments || assessments.length === 0) {
     itemsList.innerHTML = '<p class="empty-msg">No items checked yet.</p>';
@@ -240,7 +240,7 @@ function renderItems(assessments) {
 }
 
 
-// ── Export PDF from dashboard ─────────────────────────────
+//  Export PDF from dashboard 
 function exportPDF(assessment, budget, personality) {
   var risk      = assessment.risk_level;
   var riskLabel = risk === 'green' ? 'LOW RISK' : risk === 'yellow' ? 'MODERATE RISK' : 'HIGH RISK';
@@ -308,7 +308,7 @@ function exportPDF(assessment, budget, personality) {
   win.document.close();
 }
 
-// ── Check auth ────────────────────────────────────────────
+// Check auth 
 async function checkAuth() {
   try {
     const fd = new FormData();
@@ -324,7 +324,7 @@ async function checkAuth() {
   }
 }
 
-// ── Load health score + trend ─────────────────────────────
+// Load health score + trend 
 async function loadHealthScore() {
   try {
     const res  = await fetch(`${API_BASE}/history.php?action=health_score`);
@@ -371,7 +371,7 @@ async function loadHealthScore() {
   }
 }
 
-// ── Load sessions ─────────────────────────────────────────
+// Load sessions 
 async function loadSessions() {
   try {
     const res  = await fetch(`${API_BASE}/history.php?action=sessions`);
@@ -428,7 +428,7 @@ async function loadSessions() {
   }
 }
 
-// ── Load last assessment + all items ─────────────────────
+//  Load last assessment + all items 
 async function loadLastAssessment(sessionId) {
   try {
     const res  = await fetch(`${API_BASE}/history.php?action=all_assessments`);
@@ -463,7 +463,7 @@ async function loadLastAssessment(sessionId) {
   }
 }
 
-// ── Logout ────────────────────────────────────────────────
+//  Logout
 if (logoutBtn) {
   logoutBtn.addEventListener('click', async () => {
     try {
@@ -476,7 +476,7 @@ if (logoutBtn) {
   });
 }
 
-// ── Init ──────────────────────────────────────────────────
+// Init 
 (async () => {
   const authed = await checkAuth();
   if (!authed) return;
@@ -484,7 +484,7 @@ if (logoutBtn) {
 })();
 
 
-// ── Budget Health Tips ───────────────────────────────────
+// Budget Health Tips 
 function renderHealthTips(budget, healthScore) {
   var container = document.getElementById('health-tips-list');
   if (!container) return;
@@ -537,8 +537,10 @@ function renderHealthTips(budget, healthScore) {
   }).join('');
 }
 
-// ── Savings Goal Tracker ─────────────────────────────────
+//  Savings Goal Tracker 
 const API_BASE_DASH = '../tier2-backend/api';
+
+var goalsMap = {};
 
 async function loadSavingsGoals() {
   try {
@@ -551,7 +553,9 @@ async function loadSavingsGoals() {
       return;
     }
     list.innerHTML = '';
+    goalsMap = {};
     data.goals.forEach(function(g) {
+      goalsMap[g.id] = g;
       var card = document.createElement('div');
       card.style.cssText = 'background:var(--bg);border-radius:var(--radius-sm);padding:16px;margin-bottom:12px;border:1.5px solid var(--border);';
 
@@ -613,6 +617,7 @@ async function loadSavingsGoals() {
         '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
           '<button onclick="showAddSavings(' + g.id + ',' + g.current_savings + ')" style="font-size:12px;padding:5px 12px;background:var(--primary);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;">+ Add to savings</button>' +
           '<button onclick="showUpdateDetails(' + g.id + ',' + g.current_savings + ',' + g.income + ',' + g.expenses + ')" style="font-size:12px;padding:5px 12px;background:transparent;border:1.5px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;color:var(--text);">Update details</button>' +
+          '<button onclick="exportGoalPDF(goalsMap[' + g.id + '])" style="font-size:12px;padding:5px 12px;background:transparent;border:1.5px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;color:var(--text);">⬇ PDF</button>' +
         '</div>' +
 
         // Inline form (hidden by default)
@@ -644,13 +649,67 @@ async function loadSavingsGoals() {
   } catch(e) { console.error('Goals error:', e); }
 }
 
+function showConfirmModal(message, onConfirm) {
+  var modal = document.getElementById('confirm-modal');
+  var msg   = document.getElementById('confirm-modal-msg');
+  var yes   = document.getElementById('confirm-modal-yes');
+  var no    = document.getElementById('confirm-modal-no');
+  if (!modal) { if (onConfirm && confirm(message)) onConfirm(); return; }
+  msg.textContent = message;
+  modal.style.display = 'flex';
+  var cleanup = function() { modal.style.display = 'none'; yes.onclick = null; no.onclick = null; };
+  yes.onclick = function() { cleanup(); if (onConfirm) onConfirm(); };
+  no.onclick  = function() { cleanup(); };
+  modal.onclick = function(e) { if (e.target === modal) cleanup(); };
+}
+
 function deleteGoal(id) {
-  if (!confirm('Delete this goal?')) return;
-  var fd = new FormData();
-  fd.append('action', 'delete_savings_goal');
-  fd.append('goal_id', id);
-  fetch(API_BASE_DASH + '/history.php', { method:'POST', body:fd })
-    .then(function() { loadSavingsGoals(); });
+  showConfirmModal('Delete this savings goal? This cannot be undone.', function() {
+    var fd = new FormData();
+    fd.append('action', 'delete_savings_goal');
+    fd.append('goal_id', id);
+    fetch(API_BASE_DASH + '/history.php', { method:'POST', body:fd })
+      .then(function() { loadSavingsGoals(); });
+  });
+}
+
+function exportGoalPDF(g) {
+  var feasible = g.monthly_needed <= g.surplus;
+  var deadline = new Date(g.deadline);
+  var deadlineStr = deadline.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+  var naturalMonths = g.surplus > 0 ? Math.ceil(g.remaining / g.surplus) : 0;
+  var naturalDate = '';
+  if (naturalMonths > 0) {
+    var nd = new Date();
+    nd.setMonth(nd.getMonth() + naturalMonths);
+    naturalDate = nd.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+  }
+  var statusMsg = naturalMonths <= g.months_left
+    ? 'On track - goal reached by ' + naturalDate
+    : 'Behind schedule - goal reached by ' + naturalDate + ' (' + (naturalMonths - g.months_left) + ' months late)';
+
+  var win = window.open('', '_blank');
+  win.document.write('<!DOCTYPE html><html><head><title>SmartSpend - ' + g.item_name + ' Goal</title><style>body{font-family:Helvetica,sans-serif;margin:0;padding:0;color:#2C3E50}.header{background:#00B4A6;color:#fff;padding:20px 30px}.header h1{margin:0;font-size:22px}.disclaimer{background:#E0F2F1;color:#00B4A6;font-size:11px;padding:8px 30px}.content{padding:24px 30px}h2{font-size:14px;border-bottom:1px solid #E0F2F1;padding-bottom:6px;margin-bottom:12px}table{width:100%;border-collapse:collapse;font-size:13px}td{padding:7px 4px;border-bottom:1px solid #f0f0f0}td:last-child{text-align:right;font-weight:500}.progress-bg{background:#E0F2F1;border-radius:20px;height:10px;margin:12px 0}.progress-fill{background:#00B4A6;border-radius:20px;height:10px}.footer{margin-top:32px;padding-top:12px;border-top:1px solid #E0F2F1;font-size:10px;color:#7F8C8D}.date{float:right;font-size:11px;opacity:.7}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body>' +
+    '<div class="header"><span class="date">' + new Date().toLocaleDateString('en-GB') + '</span><h1>SmartSpend</h1><p>Savings Goal Report</p></div>' +
+    '<div class="disclaimer">Not a financial adviser - for educational purposes only.</div>' +
+    '<div class="content">' +
+    '<h2>' + g.item_name + '</h2>' +
+    '<div class="progress-bg"><div class="progress-fill" style="width:' + Math.min(g.pct,100) + '%"></div></div>' +
+    '<p style="font-size:12px;color:#7F8C8D;margin-bottom:16px;">' + g.pct + '% saved toward target</p>' +
+    '<table>' +
+    '<tr><td>Target Amount</td><td>£' + g.target_amount.toFixed(2) + '</td></tr>' +
+    '<tr><td>Current Savings</td><td>£' + g.current_savings.toFixed(2) + '</td></tr>' +
+    '<tr><td>Remaining</td><td>£' + g.remaining.toFixed(2) + '</td></tr>' +
+    '<tr><td>Deadline</td><td>' + deadlineStr + '</td></tr>' +
+    '<tr><td>Monthly Income</td><td>£' + g.income.toFixed(2) + '</td></tr>' +
+    '<tr><td>Monthly Expenses</td><td>£' + g.expenses.toFixed(2) + '</td></tr>' +
+    '<tr><td>Monthly Surplus</td><td>£' + g.surplus.toFixed(2) + '</td></tr>' +
+    '<tr><td>Status</td><td>' + statusMsg + '</td></tr>' +
+    '</table>' +
+    '<div class="footer">SmartSpend - Not a financial adviser. For educational purposes only.</div>' +
+    '</div>' +
+    '<script>window.onload=function(){window.print();}<\/script></body></html>');
+  win.document.close();
 }
 
 function showAddSavings(id, current) {

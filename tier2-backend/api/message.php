@@ -256,7 +256,17 @@ if (!empty($state['needs_memory_confirm'])) {
 if (preg_match('/compare|something else|alternative|versus|vs/i', $message) && $state['step'] === 'active' && !empty($state['checks']) && !$num) {
   $last = $state['checks'][count($state['checks'])-1];
   $state['comparing'] = true;
-  respond($db,$session_id,$state,'Sure - what item would you like to compare with the '.$last['item_name'].'? Tell me the item name and price.',null,[]);
+  $state['active_goal'] = null;
+  if (count($state['checks']) >= 2) {
+    $prev_items = [];
+    foreach (array_slice($state['checks'], -5) as $c) {
+      $prev_items[] = $c['item_name'].' £'.number_format($c['item_price'],0);
+    }
+    $qr = array_merge($prev_items, ['Other']);
+    respond($db,$session_id,$state,'Sure - which items would you like to compare? Pick two from your previous checks or type a new one:',null,$qr);
+  } else {
+    respond($db,$session_id,$state,'Sure - what item would you like to compare with the '.$last['item_name'].'? Tell me the item name and price.',null,[]);
+  }
 }
 
 // User wants to update all figures
@@ -478,16 +488,29 @@ if (!empty($state['income']) && !empty($state['expenses']) && isset($state['savi
   if ($new_name && $new_cost) {
     $state['active_goal'] = ['name'=>$new_name,'cost'=>$new_cost,'type'=>$new_type];
     $already_done = false;
+    $matched_check = null;
     foreach ($state['checks'] as $c) {
       if (strtolower($c['item_name'])===strtolower($new_name) && abs($c['item_price']-$new_cost)<1) {
-        $already_done = true; break;
+        $already_done = true;
+        $matched_check = $c;
+        break;
       }
     }
-    if (!$already_done) {
+    if ($already_done && !empty($state['comparing']) && $matched_check) {
+      // User picked a base item to compare against - store it and ask for the new item
+      $state['compare_base'] = $matched_check;
+      $state['comparing']    = false;
+      $state['active_goal']  = null;
+      respond($db,$session_id,$state,'Got it - comparing against the '.$matched_check['item_name'].' (£'.number_format($matched_check['item_price'],2).'). What item would you like to compare it against? Tell me the item name and price.',null,[]);
+    } elseif (!$already_done) {
       $result      = runCalc($db,$session_id,$user_id,$state,$new_name,$new_cost,$new_type,$history);
       $calculation = $result['calculation'];
       $system_results['affordability'] = $result['label'].' for '.$new_name;
       $quick_replies = ['Check another item','Compare with something else','Run a stress test','Reset budget'];
+      // If compare_base is set, trigger comparison against it
+      if (!empty($state['compare_base'])) {
+        $state['comparing'] = true;
+      }
     }
   }
 }
@@ -522,7 +545,13 @@ if (!empty($system_results['affordability'])) {
 
   if (!empty($state['comparing']) && count($state['checks']) >= 2) {
     $state['comparing'] = false;
-    $prev = $state['checks'][count($state['checks'])-2];
+    // Use compare_base if set, otherwise use second to last check
+    if (!empty($state['compare_base'])) {
+      $prev = $state['compare_base'];
+      $state['compare_base'] = null;
+    } else {
+      $prev = $state['checks'][count($state['checks'])-2];
+    }
     $comparison_calc = array_merge($prev['calc'], ['item_name'=>$prev['item_name'],'item_price'=>$prev['item_price'],'item_type'=>$prev['item_type']]);
     $riskOrder = ['green'=>0,'yellow'=>1,'red'=>2];
     $prevRisk = $riskOrder[$prev['risk_level']] ?? 2;

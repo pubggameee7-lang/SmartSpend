@@ -592,7 +592,7 @@ function showWelcome() {
   `;
 }
 
-// ── PDF Export via print ─────────────────────────────────
+// PDF Export via print 
 function exportResultPDF(calc) {
   var risk      = calc.risk_level;
   var riskLabel = risk === 'green' ? 'LOW RISK' : risk === 'yellow' ? 'MODERATE RISK' : 'HIGH RISK';
@@ -777,11 +777,17 @@ function buildComparisonCard(calc1, calc2) {
   } else if (riskOrder[calc2.risk_level] < riskOrder[calc1.risk_level]) {
     banner.textContent = '✓ ' + calc2.item_name + ' is the better financial choice';
     banner.style.color = 'var(--risk-green)';
-  } else if (calc1.months_to_save <= calc2.months_to_save) {
+  } else if (calc1.months_to_save < calc2.months_to_save) {
     banner.textContent = '✓ ' + calc1.item_name + ' is achievable sooner';
     banner.style.color = 'var(--primary)';
-  } else {
+  } else if (calc2.months_to_save < calc1.months_to_save) {
     banner.textContent = '✓ ' + calc2.item_name + ' is achievable sooner';
+    banner.style.color = 'var(--primary)';
+  } else if (Number(calc1.item_price) <= Number(calc2.item_price)) {
+    banner.textContent = '✓ ' + calc1.item_name + ' is cheaper';
+    banner.style.color = 'var(--primary)';
+  } else {
+    banner.textContent = '✓ ' + calc2.item_name + ' is cheaper';
     banner.style.color = 'var(--primary)';
   }
   wrap.appendChild(banner);

@@ -262,8 +262,8 @@ if (preg_match('/compare|something else|alternative|versus|vs/i', $message) && $
     foreach (array_slice($state['checks'], -5) as $c) {
       $prev_items[] = $c['item_name'].' £'.number_format($c['item_price'],0);
     }
-    $qr = array_merge($prev_items, ['Other']);
-    respond($db,$session_id,$state,'Sure - which items would you like to compare? Pick two from your previous checks or type a new one:',null,$qr);
+    $qr = $prev_items;
+    respond($db,$session_id,$state,'Sure - pick an item to compare against, or type a new item and price below:',null,$qr);
   } else {
     respond($db,$session_id,$state,'Sure - what item would you like to compare with the '.$last['item_name'].'? Tell me the item name and price.',null,[]);
   }
@@ -558,7 +558,9 @@ if (!empty($system_results['affordability'])) {
     $currRisk = $riskOrder[$r['risk_level']] ?? 2;
     if ($prevRisk < $currRisk) $winner = $prev['item_name'];
     elseif ($currRisk < $prevRisk) $winner = $r['item_name'];
-    elseif ($prev['calc']['months_to_save'] <= $r['months_to_save']) $winner = $prev['item_name'];
+    elseif ($prev['calc']['months_to_save'] < $r['months_to_save']) $winner = $prev['item_name'];
+    elseif ($r['months_to_save'] < $prev['calc']['months_to_save']) $winner = $r['item_name'];
+    elseif ($prev['item_price'] <= $r['item_price']) $winner = $prev['item_name'];
     else $winner = $r['item_name'];
     $bot_reply = "Here is your side by side comparison:\n\n".
       "📦 ".$prev['item_name']." — £".number_format($prev['item_price'],2)." · ".strtoupper($prev['risk_level'])." risk · ".($prev['calc']['months_to_save']===0?'Already affordable':$prev['calc']['months_to_save'].' months to save')."\n".

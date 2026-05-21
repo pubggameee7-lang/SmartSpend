@@ -55,7 +55,16 @@ if ($method === 'GET') {
         'created_at'  => $m['created_at'],
       ];
     }, $messages);
-    echo json_encode(['success' => true, 'messages' => $clean_messages]);
+    // Get last quick replies from conversation state
+    $stmt2 = $db->prepare('SELECT state FROM conversation_state WHERE session_id = ?');
+    $stmt2->execute([$session_id]);
+    $state_row = $stmt2->fetch();
+    $last_qr = [];
+    if ($state_row) {
+      $st = json_decode($state_row['state'], true);
+      $last_qr = $st['last_quick_replies'] ?? [];
+    }
+    echo json_encode(['success' => true, 'messages' => $clean_messages, 'last_quick_replies' => $last_qr]);
     exit;
   }
 

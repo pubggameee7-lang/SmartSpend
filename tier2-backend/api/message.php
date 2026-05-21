@@ -78,7 +78,16 @@ $history = array_values(array_filter($history_raw, function($m) use ($raw_messag
   return true;
 }));
 
+// Utility: clean price numbers from an item name
+function cleanItemName(string $name): string {
+  // Strip trailing price/number e.g. "hat 300" -> "hat", "ring 1k" -> "ring"
+  $clean = preg_replace('/\s+£?\d[\d,.]*k?\s*$/i', '', trim($name));
+  $clean = trim(preg_replace('/\s+/', ' ', $clean));
+  return strlen($clean) > 0 ? $clean : $name;
+}
+
 function respond(PDO $db, int $sid, array $state, string $reply, ?array $calc, array $qr, ?array $comparison_calc = null): void {
+  $state['last_quick_replies'] = $qr;
   $stmt = $db->prepare('INSERT INTO conversation_state (session_id, state) VALUES (?, ?) ON DUPLICATE KEY UPDATE state=VALUES(state), updated_at=NOW()');
   $stmt->execute([$sid, json_encode($state)]);
   $save_calc = $calc;
@@ -90,6 +99,7 @@ function respond(PDO $db, int $sid, array $state, string $reply, ?array $calc, a
 }
 
 function runCalc(PDO $db, int $sid, int $uid, array &$state, string $name, float $cost, string $type, array $history): array {
+  $name = cleanItemName($name);
   $calc = calculate($state['income'], $state['expenses'], $state['savings'], $cost, $type);
   $db->prepare('INSERT INTO budgets (session_id,income,expenses,savings) VALUES (?,?,?,?)')->execute([$sid,$state['income'],$state['expenses'],$state['savings']]);
   $db->prepare('INSERT INTO assessments (session_id,item_name,item_price,item_type,risk_level,surplus,surplus_after,months_to_save) VALUES (?,?,?,?,?,?,?,?)')->execute([$sid,$name,$cost,$type,$calc['risk_level'],$calc['surplus'],$calc['surplus_after'],$calc['months_to_save']]);
@@ -169,7 +179,7 @@ if ($state['step'] === 'greeting') {
   $item_name = $goal_name_hint ?? parseItemName($message);
   if ($item_name) {
     $item_name = preg_replace('/\b(costing|worth|at|for|priced?|costs?|approximately|around|roughly)\b\s*£?[\d,.km]*/i', '', $item_name);
-    $item_name = trim(preg_replace('/\s+/', ' ', $item_name));
+    $item_name = trim($item_name);
   }
   $item_cost = ($num && $num > 50) ? $num : null;
   $item_type = $goal_type_hint ?? (preg_match('/per month|monthly|subscription|recurring/i', $message) ? 'recurring' : 'one-time');
@@ -262,8 +272,7 @@ if (preg_match('/compare|something else|alternative|versus|vs/i', $message) && $
     foreach (array_slice($state['checks'], -5) as $c) {
       $prev_items[] = $c['item_name'].' £'.number_format($c['item_price'],0);
     }
-    $qr = $prev_items;
-    respond($db,$session_id,$state,'Sure - pick an item to compare against, or type a new item and price below:',null,$qr);
+    respond($db,$session_id,$state,'Sure - pick an item to compare against, or type a new item and price below:',null,$prev_items);
   } else {
     respond($db,$session_id,$state,'Sure - what item would you like to compare with the '.$last['item_name'].'? Tell me the item name and price.',null,[]);
   }
@@ -282,6 +291,12 @@ $system_results = [];
 $calculation    = null;
 $quick_replies  = ['Check another item','Run a stress test','Reset budget','Other'];
 $action_taken   = false;
+
+// Block income/expense change when in comparison flow
+if (!empty($state['compare_base']) || !empty($state['comparing'])) {
+  $income_change  = false;
+  $expense_change = false;
+}
 
 if ($income_change && $num && $num > 0 && !$action_taken && !in_array('stress_test',$intents)) {
   if (preg_match('/(\d+(?:\.\d+)?)\s*%/i', $message, $pct) && !empty($state['income'])) {
@@ -321,6 +336,12 @@ if ($is_extra_saving && !$action_taken) {
   $t  = $months===0 ? 'already there' : ($y>0 ? $y.' year'.($y>1?'s':'').($mo>0?' and '.$mo.' months':'') : $months.' months');
   $system_results['saving_timeline'] = 'With your current surplus of £'.number_format($current_surplus,2).'/month plus £'.number_format($num,2).'/month extra, saving £'.number_format($new_saving_rate,2).'/month toward '.($ag['name']??'goal').' (£'.number_format($target,2).'): approximately '.$t;
   $action_taken = true;
+}
+
+// When in comparison flow, block expense/income change detection
+if (!empty($state['compare_base']) || !empty($state['comparing'])) {
+  $expense_change = false;
+  $income_change  = false;
 }
 
 if ($expense_change && !$is_extra_saving && $num !== null && $num >= 0 && $num < ($state['income'] ?? PHP_INT_MAX) && !$loan_mentioned && !$action_taken) {
@@ -454,13 +475,38 @@ if (!empty($state['income']) && !empty($state['expenses']) && isset($state['savi
   $new_cost = null;
   $new_type = 'one-time';
 
-  if (!$goal_name_hint && $num && $num > 50 && !$loan_mentioned && !$expense_change && !$sub_mentioned && !$is_extra_saving) {
-    $stripped = preg_replace('/'.preg_quote(number_format($num,0,'.',','),'/').'|£[\d,]+k?|\d+k?/i', '', $message);
+  // When compare_base is set, force name from message directly
+  if (!empty($state['compare_base']) && $num && $num > 50) {
+    $expense_change = false;
+    $income_change  = false;
+    $stripped = preg_replace('/[£$]?\d[\d,.]*k?\b/i', '', $message);
+    $stripped = trim($stripped);
+    if (strlen($stripped) > 1) $goal_name_hint = $stripped;
+  }
+
+  // Handle zero price
+  if ($num === 0.0 && $goal_name_hint) {
+    respond($db,$session_id,$state,"If the ".$goal_name_hint." is free, you can afford it! Is there anything else you would like to check?",null,['Check another item','Reset budget']);
+  }
+
+  if (!$goal_name_hint && $num && $num > 0 && !$loan_mentioned && !$expense_change && !$sub_mentioned && !$is_extra_saving) {
+    $stripped = preg_replace('/£?\d[\d,.]*k?\b/i', '', $message);
     $stripped = trim(preg_replace('/\s+/', ' ', $stripped));
     if (strlen($stripped) > 2) $goal_name_hint = $stripped;
   }
 
-  if ($goal_name_hint && $num && $num > 50 && !$loan_mentioned && !$expense_change && !$sub_mentioned && !$is_extra_saving) {
+  // If active_goal has a name waiting for price, block income/expense change
+  if (!empty($state['active_goal']['name']) && empty($state['active_goal']['cost']) && $num && $num > 0) {
+    $expense_change = false;
+    $income_change  = false;
+    $new_name = $state['active_goal']['name'];
+    $new_cost = $num;
+    $new_type = $state['active_goal']['type'] ?? 'one-time';
+    $state['compare_base'] = null;
+    $state['comparing']    = false;
+  }
+
+  if ($goal_name_hint && $num && $num > 0 && !$loan_mentioned && !$expense_change && !$sub_mentioned && !$is_extra_saving) {
     $new_name = $goal_name_hint;
     $new_cost = $num;
     $new_type = $goal_type_hint ?? 'one-time';
@@ -474,9 +520,14 @@ if (!empty($state['income']) && !empty($state['expenses']) && isset($state['savi
     $generic = preg_match('/^(another item|something|an item|a thing|item|something else|total loss|loss of income|total loss of income|stress test|run a stress test)$/i', trim($parsed_name ?? ''));
     if ($parsed_name && strlen($parsed_name) > 1 && !$generic) {
       $state['active_goal'] = ['name' => $parsed_name, 'cost' => null, 'type' => $goal_type_hint ?? 'one-time'];
+      $state['compare_base'] = null;
+      $state['comparing']    = false;
+      $state['income_change_mentioned'] = false;
       $bot_reply = 'Sure - how much does the '.$parsed_name.' cost?';
       respond($db,$session_id,$state,$bot_reply,null,[]);
     } elseif (!$parsed_name || $generic) {
+      $state['compare_base'] = null;
+      $state['comparing']    = false;
       respond($db,$session_id,$state,'What item would you like to check next, and how much does it cost?',null,[]);
     }
   } elseif (in_array('affordability_check',$intents) && !$refs_prev_goal && !$loan_mentioned && !$expense_change && !$is_extra_saving && $num && $num > 50) {
@@ -487,27 +538,26 @@ if (!empty($state['income']) && !empty($state['expenses']) && isset($state['savi
 
   if ($new_name && $new_cost) {
     $state['active_goal'] = ['name'=>$new_name,'cost'=>$new_cost,'type'=>$new_type];
-    $already_done = false;
+    $already_done  = false;
     $matched_check = null;
     foreach ($state['checks'] as $c) {
-      if (strtolower($c['item_name'])===strtolower($new_name) && abs($c['item_price']-$new_cost)<1) {
-        $already_done = true;
+      if (strtolower($c['item_name']) === strtolower($new_name) && abs($c['item_price']-$new_cost) < 1) {
+        $already_done  = true;
         $matched_check = $c;
         break;
       }
     }
     if ($already_done && !empty($state['comparing']) && $matched_check) {
-      // User picked a base item to compare against - store it and ask for the new item
+      // User picked a base item - store it and ask what to compare against
       $state['compare_base'] = $matched_check;
       $state['comparing']    = false;
       $state['active_goal']  = null;
-      respond($db,$session_id,$state,'Got it - comparing against the '.$matched_check['item_name'].' (£'.number_format($matched_check['item_price'],2).'). What item would you like to compare it against? Tell me the item name and price.',null,[]);
+      respond($db,$session_id,$state,'Got it - what would you like to compare the '.$matched_check['item_name'].' against? Tell me the item name and price.',null,[]);
     } elseif (!$already_done) {
-      $result      = runCalc($db,$session_id,$user_id,$state,$new_name,$new_cost,$new_type,$history);
-      $calculation = $result['calculation'];
+      $result        = runCalc($db,$session_id,$user_id,$state,$new_name,$new_cost,$new_type,$history);
+      $calculation   = $result['calculation'];
       $system_results['affordability'] = $result['label'].' for '.$new_name;
       $quick_replies = ['Check another item','Compare with something else','Run a stress test','Reset budget'];
-      // If compare_base is set, trigger comparison against it
       if (!empty($state['compare_base'])) {
         $state['comparing'] = true;
       }
@@ -545,7 +595,6 @@ if (!empty($system_results['affordability'])) {
 
   if (!empty($state['comparing']) && count($state['checks']) >= 2) {
     $state['comparing'] = false;
-    // Use compare_base if set, otherwise use second to last check
     if (!empty($state['compare_base'])) {
       $prev = $state['compare_base'];
       $state['compare_base'] = null;
@@ -554,14 +603,14 @@ if (!empty($system_results['affordability'])) {
     }
     $comparison_calc = array_merge($prev['calc'], ['item_name'=>$prev['item_name'],'item_price'=>$prev['item_price'],'item_type'=>$prev['item_type']]);
     $riskOrder = ['green'=>0,'yellow'=>1,'red'=>2];
-    $prevRisk = $riskOrder[$prev['risk_level']] ?? 2;
-    $currRisk = $riskOrder[$r['risk_level']] ?? 2;
-    if ($prevRisk < $currRisk) $winner = $prev['item_name'];
-    elseif ($currRisk < $prevRisk) $winner = $r['item_name'];
+    $prevRisk  = $riskOrder[$prev['risk_level']] ?? 2;
+    $currRisk  = $riskOrder[$r['risk_level']] ?? 2;
+    if ($prevRisk < $currRisk)                               $winner = $prev['item_name'];
+    elseif ($currRisk < $prevRisk)                           $winner = $r['item_name'];
     elseif ($prev['calc']['months_to_save'] < $r['months_to_save']) $winner = $prev['item_name'];
     elseif ($r['months_to_save'] < $prev['calc']['months_to_save']) $winner = $r['item_name'];
-    elseif ($prev['item_price'] <= $r['item_price']) $winner = $prev['item_name'];
-    else $winner = $r['item_name'];
+    elseif ($prev['item_price'] <= $r['item_price'])         $winner = $prev['item_name'];
+    else                                                     $winner = $r['item_name'];
     $bot_reply = "Here is your side by side comparison:\n\n".
       "📦 ".$prev['item_name']." — £".number_format($prev['item_price'],2)." · ".strtoupper($prev['risk_level'])." risk · ".($prev['calc']['months_to_save']===0?'Already affordable':$prev['calc']['months_to_save'].' months to save')."\n".
       "📦 ".$r['item_name']." — £".number_format($r['item_price'],2)." · ".strtoupper($r['risk_level'])." risk · ".($r['months_to_save']===0?'Already affordable':$r['months_to_save'].' months to save');

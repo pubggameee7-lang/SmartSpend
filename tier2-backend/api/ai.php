@@ -106,7 +106,7 @@ affordability_check, correction, saving_time, comparison, loan_question,
 emotional, unrelated, custom_savings_calc, stress_test, goal_update,
 subscription, income_update, expense_update, advice_request, memory_check
 
-goal_name: clean item name only if a NEW purchase goal is mentioned - NO prices, NO filler words. null if no new goal.
+goal_name: the item name ONLY - never include any numbers, prices or amounts. Extract ONLY the descriptive words. Examples: "hat 300" -> "hat", "ring 500" -> "ring", "1k bag" -> "bag". null if no new goal mentioned.
 goal_type: "one-time" or "recurring" only if clearly determinable, else null
 correction_field: ONLY set if user is explicitly correcting a previously stated value.
   Use: "income"|"expenses"|"savings"|"goal_cost"|"loan_amount"|"loan_months"|"loan_interest"

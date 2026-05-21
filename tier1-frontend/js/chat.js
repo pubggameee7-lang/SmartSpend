@@ -560,6 +560,9 @@ async function loadSessionMessages(sessionId, el) {
           addMessage(msg.role, msg.content, calc);
         }
       });
+      if (data.last_quick_replies && data.last_quick_replies.length > 0) {
+        renderQuickReplies(data.last_quick_replies);
+      }
     } else {
       showWelcome();
     }
@@ -592,7 +595,7 @@ function showWelcome() {
   `;
 }
 
-// PDF Export via print 
+// ── PDF Export via print ─────────────────────────────────
 function exportResultPDF(calc) {
   var risk      = calc.risk_level;
   var riskLabel = risk === 'green' ? 'LOW RISK' : risk === 'yellow' ? 'MODERATE RISK' : 'HIGH RISK';

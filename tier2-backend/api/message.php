@@ -160,13 +160,13 @@ $is_emotional          = $ix['is_emotional'] ?? false;
 $is_unrelated          = $ix['is_unrelated'] ?? false;
 
 // Yes-confirm must run BEFORE correction check
-if (preg_match('/^(yes|yep|yeah|correct|all correct|they are correct|yes correct|thats correct|looks correct|looks good|right|thats right|same|use these|yes use|confirm|all good|sounds good|perfect|that is correct)/i', $lower) && $state['step'] === 'active' && !empty($state['income'])) {
+if (preg_match('/^(yes|yep|yeah|correct|all correct|they are correct|yes correct|thats correct|looks correct|looks good|right|thats right|same|use these|yes use|confirm|all good|sounds good|perfect|that is correct)/i', $lower) && $state['step'] === 'active' && !empty($state['income']) && empty($state['mode'])) {
   $item_hint = !empty($state['active_goal']['name']) ? 'How much does the '.$state['active_goal']['name'].' cost?' : 'What would you like to check? Tell me the item and the price.';
   respond($db,$session_id,$state,'Great - '.$item_hint,null,[]);
 }
 
 $correction_applicable = false;
-if ($is_correction && $state['step'] === 'active') {
+if ($is_correction && $state['step'] === 'active' && empty($state['comparing']) && empty($state['compare_base'])) {
   if ($correction_field === 'income'   && !empty($state['income']))   $correction_applicable = true;
   if ($correction_field === 'expenses' && !empty($state['expenses'])) $correction_applicable = true;
   if ($correction_field === 'savings'  && $state['savings'] !== null) $correction_applicable = true;
@@ -280,6 +280,7 @@ if ($state['step'] === 'savings') {
 
 if (!empty($state['needs_memory_confirm'])) {
   $state['needs_memory_confirm'] = false;
+  $state['mode'] = '';
   $surplus = $state['income'] - $state['expenses'];
   $bot_reply = "Welcome back! Here are your saved figures:\n\n📊 Income: £".number_format($state['income'],2)." | Expenses: £".number_format($state['expenses'],2)." | Savings: £".number_format($state['savings'],2)."\n💰 Monthly surplus: £".number_format($surplus,2)."\n\nAre these still correct, or would you like to update them?";
   respond($db,$session_id,$state,$bot_reply,null,['Yes, correct','No, update them','Other']);
@@ -322,7 +323,7 @@ if (!empty($state['active_goal']['name']) && empty($state['active_goal']['cost']
 }
 
 // PHP stress test fallback - must run BEFORE income_change handler
-if (!in_array('stress_test',$intents) && preg_match('/stress test|lost.*job|lose.*job|no income|income drop|salary cut|redundan|laid off|what if.*income|income.*drop|total loss|loss of income/i', $message)) {
+if (!in_array('stress_test',$intents) && preg_match('/\bstress test\b|lost.*job|lose.*job|\bno income\b|income drop|salary cut|redundan|laid off|what if.*income|income.*drop|\btotal loss\b|loss of income/i', $message)) {
   $intents[] = 'stress_test';
 }
 if (in_array('stress_test',$intents)) { $income_change = false; $expense_change = false; }
@@ -481,7 +482,17 @@ if ((in_array('custom_savings_calc',$intents) || in_array('saving_time',$intents
   }
 }
 
+// If in stress_test or post_stress mode and message is not a new stress request - reply conversationally
+if (!empty($state['mode']) && in_array($state['mode'], ['stress_test','post_stress']) && !$num) {
+  $isNewStress = preg_match('/\bstress test\b|\d+\s*%\s*(drop|loss|cut)|\btotal loss\b|20%|50%|income drop/i', $message);
+  if (!$isNewStress) {
+    $state['mode'] = 'item_check';
+    respond($db,$session_id,$state,generateReply($message,$state,$history),null,['Check another item','Run a stress test','Reset budget']);
+  }
+}
+
 if (in_array('stress_test',$intents) && !empty($state['income']) && !empty($state['expenses']) && !$action_taken) {
+  $state['mode'] = 'stress_test';
   $pct        = null;
   $total_loss = (bool)preg_match('/total|100|all|no income|zero|lost.*job|lose.*job|redundan|laid off|total loss/i', $message);
   if (preg_match('/(\d+)\s*%/i', $message, $m)) $pct = intval($m[1]);
@@ -530,7 +541,7 @@ if (!empty($state['income']) && !empty($state['expenses']) && isset($state['savi
   }
 
   if ($goal_name_hint && $num && $num > 0 && !$loan_mentioned && !$expense_change && !$sub_mentioned && !$is_extra_saving) {
-    $new_name = $goal_name_hint;
+    $new_name = cleanItemName($goal_name_hint);
     $new_cost = $num;
     $new_type = $goal_type_hint ?? 'one-time';
   } elseif (!$goal_name_hint && $num && $num > 0 && !empty($state['active_goal']['name']) && empty($state['active_goal']['cost']) && !$loan_mentioned && !$expense_change) {
@@ -563,7 +574,7 @@ if (!empty($state['income']) && !empty($state['expenses']) && isset($state['savi
       respond($db,$session_id,$state,'What item would you like to check next, and how much does it cost?',null,[]);
     }
   } elseif (in_array('affordability_check',$intents) && !$refs_prev_goal && !$loan_mentioned && !$expense_change && !$is_extra_saving && $num && $num > 50) {
-    $new_name = $goal_name_hint ?? ($state['active_goal']['name'] ?? null);
+    $new_name = cleanItemName($goal_name_hint ?? ($state['active_goal']['name'] ?? ''));
     $new_cost = $num;
     $new_type = $goal_type_hint ?? 'one-time';
   }
@@ -674,6 +685,7 @@ if (!empty($system_results['stress_test']) && strpos(strtolower($bot_reply),'str
   $bot_reply     = $system_results['stress_test'].'.';
   $calculation   = null;
   $quick_replies = ['Check another item','Run a stress test','Reset budget'];
+  $state['mode'] = 'post_stress';
 }
 
 $missing = getMissingBudgetField($state);

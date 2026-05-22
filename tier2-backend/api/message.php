@@ -134,8 +134,19 @@ if (preg_match('/^reset budget$/i', $lower)) {
   $state['active_goal']  = null;
   respond($db,$session_id,$state,"No problem - let's start fresh. What is your monthly income after tax?",null,['£1500','£2000','£2500','£3000','Other']);
 }
+// Use LLM flags to detect non-item messages - most reliable signal
+if (($is_emotional || $is_unrelated || $is_question_only) && !$num && $state['step'] === 'active' && empty($state['comparing']) && empty($state['compare_base'])) {
+  $state['mode'] = 'item_check';
+  respond($db,$session_id,$state,generateReply($message,$state,$history),null,['Check another item','Run a stress test','Reset budget']);
+}
+
+// When mode is set (post conversation) and user says yes/no/short reply - continue conversation
+if (!empty($state['mode']) && !$num && $state['step'] === 'active' && preg_match('/^(yes|no|yeah|nah|ok|sure|i see|makes sense|i dont know|not sure|maybe|probably|definitely|absolutely|of course|i guess|i think|tell me more|go on|and then|so what|what now)/i', $lower)) {
+  respond($db,$session_id,$state,generateReply($message,$state,$history),null,['Check another item','Run a stress test','Reset budget']);
+}
+
 // Block conversational replies from being treated as items - runs AFTER yes-confirm
-if (!$num && $state['step'] === 'active' && !$goal_name_hint && preg_match('/^(ok|sure|great|thanks|thank you|definitely|concern|worried|fine|bad|alright|sounds|feel|agree|disagree|not really|absolutely|of course|exactly|thats|that is|that\'s)/i', $lower)) {
+if (!$num && $state['step'] === 'active' && preg_match('/^(what|why|how|when|where|who|which|ok|sure|great|thanks|thank you|definitely|concern|worried|fine|bad|alright|sounds|feel|agree|disagree|not really|absolutely|of course|exactly|thats|that is|that\'s|i see|i know|makes sense|tell me|explain|really|seriously|omg|wow|oh|ah|hm|hmm)/i', $lower)) {
   respond($db,$session_id,$state,generateReply($message,$state,$history),null,['Check another item','Run a stress test','Reset budget']);
 }
 
@@ -160,7 +171,7 @@ $is_emotional          = $ix['is_emotional'] ?? false;
 $is_unrelated          = $ix['is_unrelated'] ?? false;
 
 // Yes-confirm must run BEFORE correction check
-if (preg_match('/^(yes|yep|yeah|correct|all correct|they are correct|yes correct|thats correct|looks correct|looks good|right|thats right|same|use these|yes use|confirm|all good|sounds good|perfect|that is correct)/i', $lower) && $state['step'] === 'active' && !empty($state['income']) && empty($state['mode'])) {
+if (preg_match('/^(yes|yep|yeah|correct|all correct|they are correct|yes correct|thats correct|looks correct|looks good|right|thats right|same|use these|yes use|confirm|all good|sounds good|perfect|that is correct)/i', $lower) && $state['step'] === 'active' && !empty($state['income']) && empty($state['mode']) && str_word_count($lower) <= 4) {
   $item_hint = !empty($state['active_goal']['name']) ? 'How much does the '.$state['active_goal']['name'].' cost?' : 'What would you like to check? Tell me the item and the price.';
   respond($db,$session_id,$state,'Great - '.$item_hint,null,[]);
 }
@@ -323,7 +334,9 @@ if (!empty($state['active_goal']['name']) && empty($state['active_goal']['cost']
 }
 
 // PHP stress test fallback - must run BEFORE income_change handler
-if (!in_array('stress_test',$intents) && preg_match('/\bstress test\b|lost.*job|lose.*job|\bno income\b|income drop|salary cut|redundan|laid off|what if.*income|income.*drop|\btotal loss\b|loss of income/i', $message)) {
+// Only add stress_test if NOT in post_stress/item_check mode (prevents conversational replies triggering it)
+$inConvoMode = !empty($state['mode']) && in_array($state['mode'], ['post_stress','item_check']);
+if (!$inConvoMode && !in_array('stress_test',$intents) && preg_match('/\bstress test\b|\d+\s*%\s*(drop|loss|cut)|\btotal loss of income\b|loss of income|income drop|salary cut|redundan|laid off/i', $message)) {
   $intents[] = 'stress_test';
 }
 if (in_array('stress_test',$intents)) { $income_change = false; $expense_change = false; }
@@ -486,6 +499,15 @@ if ((in_array('custom_savings_calc',$intents) || in_array('saving_time',$intents
 if (!empty($state['mode']) && in_array($state['mode'], ['stress_test','post_stress']) && !$num) {
   $isNewStress = preg_match('/\bstress test\b|\d+\s*%\s*(drop|loss|cut)|\btotal loss\b|20%|50%|income drop/i', $message);
   if (!$isNewStress) {
+    $state['mode'] = 'item_check';
+    respond($db,$session_id,$state,generateReply($message,$state,$history),null,['Check another item','Run a stress test','Reset budget']);
+  }
+}
+
+// If in post_stress mode - route to conversation regardless of message content
+if (!empty($state['mode']) && in_array($state['mode'], ['post_stress','item_check']) && !$num) {
+  $isExplicitStress = preg_match('/^(run a stress test|stress test|20% income drop|50% income drop|total loss of income|\d+% (drop|loss))/i', trim($message));
+  if (!$isExplicitStress) {
     $state['mode'] = 'item_check';
     respond($db,$session_id,$state,generateReply($message,$state,$history),null,['Check another item','Run a stress test','Reset budget']);
   }

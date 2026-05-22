@@ -116,6 +116,29 @@ if (preg_match('/^(reset|start over|restart)$/i', $lower)) {
   respond($db,$session_id,$state,"No problem - let's start fresh. What is your monthly income after tax?",null,['£1500','£2000','£2500','£3000','Other']);
 }
 
+// Detect quick reply commands before anything else
+if (preg_match('/^check another item$/i', $lower)) {
+  $state['comparing']    = false;
+  $state['compare_base'] = null;
+  $state['active_goal']  = null;
+  $state['force_name_parse'] = true;
+  respond($db,$session_id,$state,'What would you like to check next? Tell me the item and the price.',null,[]);
+}
+if (preg_match('/^reset budget$/i', $lower)) {
+  $state['income']   = null;
+  $state['expenses'] = null;
+  $state['savings']  = null;
+  $state['step']     = 'income';
+  $state['comparing']    = false;
+  $state['compare_base'] = null;
+  $state['active_goal']  = null;
+  respond($db,$session_id,$state,"No problem - let's start fresh. What is your monthly income after tax?",null,['£1500','£2000','£2500','£3000','Other']);
+}
+// Block conversational replies from being treated as items - runs AFTER yes-confirm
+if (!$num && $state['step'] === 'active' && !$goal_name_hint && preg_match('/^(ok|sure|great|thanks|thank you|definitely|concern|worried|fine|bad|alright|sounds|feel|agree|disagree|not really|absolutely|of course|exactly|thats|that is|that\'s)/i', $lower)) {
+  respond($db,$session_id,$state,generateReply($message,$state,$history),null,['Check another item','Run a stress test','Reset budget']);
+}
+
 $num      = parseNumber($message);
 $interest = parseInterestRate($message);
 $term     = parseLoanTerm($message);
@@ -292,6 +315,18 @@ $calculation    = null;
 $quick_replies  = ['Check another item','Run a stress test','Reset budget','Other'];
 $action_taken   = false;
 
+// Block income/expense change when active_goal waiting for price
+if (!empty($state['active_goal']['name']) && empty($state['active_goal']['cost']) && $num && $num > 0) {
+  $expense_change = false;
+  $income_change  = false;
+}
+
+// PHP stress test fallback - must run BEFORE income_change handler
+if (!in_array('stress_test',$intents) && preg_match('/stress test|lost.*job|lose.*job|no income|income drop|salary cut|redundan|laid off|what if.*income|income.*drop|total loss|loss of income/i', $message)) {
+  $intents[] = 'stress_test';
+}
+if (in_array('stress_test',$intents)) { $income_change = false; $expense_change = false; }
+
 // Block income/expense change when in comparison flow
 if (!empty($state['compare_base']) || !empty($state['comparing'])) {
   $income_change  = false;
@@ -446,18 +481,13 @@ if ((in_array('custom_savings_calc',$intents) || in_array('saving_time',$intents
   }
 }
 
-// PHP stress test fallback
-if (!in_array('stress_test',$intents) && preg_match('/stress test|lost.*job|lose.*job|no income|income drop|salary cut|redundan|laid off|what if.*income|income.*drop|total loss|loss of income/i', $message)) {
-  $intents[] = 'stress_test';
-}
-if (in_array('stress_test',$intents)) $income_change = false;
-
 if (in_array('stress_test',$intents) && !empty($state['income']) && !empty($state['expenses']) && !$action_taken) {
   $pct        = null;
   $total_loss = (bool)preg_match('/total|100|all|no income|zero|lost.*job|lose.*job|redundan|laid off|total loss/i', $message);
   if (preg_match('/(\d+)\s*%/i', $message, $m)) $pct = intval($m[1]);
   if (!$total_loss && !$pct) {
     respond($db,$session_id,$state,"Sure - let's run a stress test. What scenario would you like to test?\n\n- A percentage drop in income (e.g. 20% drop)\n- Total loss of income\n- A specific new income amount",null,['20% income drop','50% income drop','Total loss of income','Other']);
+
   }
   if ($total_loss || $pct) {
     $new_inc  = $total_loss ? 0 : round($state['income'] * (1 - ($pct/100)), 2);
@@ -489,27 +519,26 @@ if (!empty($state['income']) && !empty($state['expenses']) && isset($state['savi
     respond($db,$session_id,$state,"If the ".$goal_name_hint." is free, you can afford it! Is there anything else you would like to check?",null,['Check another item','Reset budget']);
   }
 
-  if (!$goal_name_hint && $num && $num > 0 && !$loan_mentioned && !$expense_change && !$sub_mentioned && !$is_extra_saving) {
-    $stripped = preg_replace('/£?\d[\d,.]*k?\b/i', '', $message);
-    $stripped = trim(preg_replace('/\s+/', ' ', $stripped));
-    if (strlen($stripped) > 2) $goal_name_hint = $stripped;
-  }
-
-  // If active_goal has a name waiting for price, block income/expense change
-  if (!empty($state['active_goal']['name']) && empty($state['active_goal']['cost']) && $num && $num > 0) {
-    $expense_change = false;
-    $income_change  = false;
-    $new_name = $state['active_goal']['name'];
-    $new_cost = $num;
-    $new_type = $state['active_goal']['type'] ?? 'one-time';
-    $state['compare_base'] = null;
-    $state['comparing']    = false;
+  // Always parse name from message - use it when LLM name contains numbers
+  $msg_name = preg_replace('/£?\d[\d,.]*k?\b/i', '', $message);
+  $msg_name = trim(preg_replace('/\s+/', ' ', $msg_name));
+  if (strlen($msg_name) > 1) {
+    // Use message-based name if LLM name contains digits or is longer (more accurate)
+    if (!$goal_name_hint || preg_match('/\d/', $goal_name_hint) || strlen($msg_name) > strlen($goal_name_hint)) {
+      $goal_name_hint = $msg_name;
+    }
   }
 
   if ($goal_name_hint && $num && $num > 0 && !$loan_mentioned && !$expense_change && !$sub_mentioned && !$is_extra_saving) {
     $new_name = $goal_name_hint;
     $new_cost = $num;
     $new_type = $goal_type_hint ?? 'one-time';
+  } elseif (!$goal_name_hint && $num && $num > 0 && !empty($state['active_goal']['name']) && empty($state['active_goal']['cost']) && !$loan_mentioned && !$expense_change) {
+    $new_name = $state['active_goal']['name'];
+    $new_cost = $num;
+    $new_type = $state['active_goal']['type'] ?? 'one-time';
+    // Restore comparison context if compare_base is set or comparing was true
+    if (!empty($state['compare_base']) || !empty($state['comparing'])) $state['comparing'] = true;
   } elseif (!$loan_mentioned && !$expense_change && !$is_extra_saving && !$refs_prev_goal && !$num && !in_array('stress_test',$intents)) {
     $parsed_name = $goal_name_hint;
     if (!$parsed_name) {
@@ -520,14 +549,17 @@ if (!empty($state['income']) && !empty($state['expenses']) && isset($state['savi
     $generic = preg_match('/^(another item|something|an item|a thing|item|something else|total loss|loss of income|total loss of income|stress test|run a stress test)$/i', trim($parsed_name ?? ''));
     if ($parsed_name && strlen($parsed_name) > 1 && !$generic) {
       $state['active_goal'] = ['name' => $parsed_name, 'cost' => null, 'type' => $goal_type_hint ?? 'one-time'];
-      $state['compare_base'] = null;
-      $state['comparing']    = false;
+      // Do NOT clear comparing here - keep comparison flow alive
+      $state['force_name_parse'] = false;
       $state['income_change_mentioned'] = false;
+      $parsed_name = cleanItemName($parsed_name);
       $bot_reply = 'Sure - how much does the '.$parsed_name.' cost?';
       respond($db,$session_id,$state,$bot_reply,null,[]);
     } elseif (!$parsed_name || $generic) {
       $state['compare_base'] = null;
       $state['comparing']    = false;
+      $state['active_goal']  = null;
+      $state['force_name_parse'] = true;
       respond($db,$session_id,$state,'What item would you like to check next, and how much does it cost?',null,[]);
     }
   } elseif (in_array('affordability_check',$intents) && !$refs_prev_goal && !$loan_mentioned && !$expense_change && !$is_extra_saving && $num && $num > 50) {
@@ -639,14 +671,9 @@ if (!empty($system_results['updated_goal_timeline']) && !preg_match('/\d+ month|
 }
 
 if (!empty($system_results['stress_test']) && strpos(strtolower($bot_reply),'stress') === false) {
-  $bot_reply = $system_results['stress_test'].'.';
-  if (!empty($state['active_goal']['name']) && !empty($state['active_goal']['cost'])) {
-    $stressed_surplus = floatval(explode('surplus = £', $system_results['stress_test'])[1] ?? 0);
-    if ($stressed_surplus > 0) {
-      $months = ceil((floatval($state['active_goal']['cost']) - ($state['savings']??0)) / $stressed_surplus);
-      $bot_reply .= "\n\nYour goal: ".$state['active_goal']['name']." (£".number_format($state['active_goal']['cost'],2).") would take approximately ".$months." months to save at this reduced surplus.";
-    }
-  }
+  $bot_reply     = $system_results['stress_test'].'.';
+  $calculation   = null;
+  $quick_replies = ['Check another item','Run a stress test','Reset budget'];
 }
 
 $missing = getMissingBudgetField($state);

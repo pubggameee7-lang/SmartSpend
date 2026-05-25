@@ -119,6 +119,7 @@ if (preg_match('/^(reset|start over|restart)$/i', $lower)) {
 // Detect quick reply commands before anything else
 if (preg_match('/^run a stress test$/i', $lower)) {
   $state['mode'] = '';
+  $state['active_goal'] = null;
   $intents[] = 'stress_test';
 }
 // Handle cancellation of reset
@@ -357,7 +358,14 @@ $inConvoMode = !empty($state['mode']) && in_array($state['mode'], ['post_stress'
 if (!$inConvoMode && !in_array('stress_test',$intents) && preg_match('/\bstress test\b|\d+\s*%\s*(drop|loss|cut)|\btotal loss of income\b|loss of income|income drop|salary cut|redundan|laid off/i', $message)) {
   $intents[] = 'stress_test';
 }
-if (in_array('stress_test',$intents)) { $income_change = false; $expense_change = false; }
+if (in_array('stress_test',$intents)) {
+  $income_change  = false;
+  $expense_change = false;
+  // Clear active_goal so it doesn't pollute conversation context
+  if (!empty($state['active_goal']['name']) && preg_match('/\d+%|income drop|stress/i', $state['active_goal']['name'] ?? '')) {
+    $state['active_goal'] = null;
+  }
+}
 
 // Block income/expense change when in comparison flow
 if (!empty($state['compare_base']) || !empty($state['comparing'])) {

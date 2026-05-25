@@ -117,6 +117,24 @@ if (preg_match('/^(reset|start over|restart)$/i', $lower)) {
 }
 
 // Detect quick reply commands before anything else
+if (preg_match('/^run a stress test$/i', $lower)) {
+  $state['mode'] = '';
+  $intents[] = 'stress_test';
+}
+// Handle cancellation of reset
+if (preg_match('/^(no|nope|cancel|never mind|actually no|no i dont|dont want|changed my mind)/i', $lower) && $state['step'] === 'income' && empty($state['income'])) {
+  // Restore saved figures
+  $stmt = $db->prepare('SELECT saved_income, saved_expenses, saved_savings FROM users WHERE id = ?');
+  $stmt->execute([$user_id]);
+  $saved = $stmt->fetch();
+  if ($saved && !empty($saved['saved_income'])) {
+    $state['income']   = floatval($saved['saved_income']);
+    $state['expenses'] = floatval($saved['saved_expenses']);
+    $state['savings']  = floatval($saved['saved_savings']);
+    $state['step']     = 'active';
+    respond($db,$session_id,$state,'No problem - your previous figures are still saved. What would you like to check?',null,['Check another item','Run a stress test','Reset budget']);
+  }
+}
 if (preg_match('/^check another item$/i', $lower)) {
   $state['comparing']    = false;
   $state['compare_base'] = null;

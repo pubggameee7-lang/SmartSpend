@@ -84,6 +84,41 @@ function cleanItemName(string $name): string {
   return strlen($clean) > 0 ? $clean : $name;
 }
 
+function emergencySavingsAdvice(array $state, ?float $monthlySaving = null): string {
+  $income   = floatval($state['income'] ?? 0);
+  $expenses = floatval($state['expenses'] ?? 0);
+  $savings  = floatval($state['savings'] ?? 0);
+  $surplus  = max(0, $income - $expenses);
+  $target3  = $expenses * 3;
+  $target6  = $expenses * 6;
+  $gap3     = max(0, $target3 - $savings);
+  $gap6     = max(0, $target6 - $savings);
+  if ($monthlySaving === null) {
+    $recommended  = $surplus > 0 ? min($surplus, max($gap3 / 3, $surplus * 0.5)) : 0;
+    $monthlySaving = round($recommended / 10) * 10;
+  }
+  $months3 = $monthlySaving > 0 ? ceil($gap3 / $monthlySaving) : null;
+  $months6 = $monthlySaving > 0 ? ceil($gap6 / $monthlySaving) : null;
+  $reply   = "Based on your numbers, I would prioritise your emergency fund first.
+
+";
+  $reply  .= "Your monthly surplus is £".number_format($surplus,2).". A sensible savings target would be about £".number_format($monthlySaving,2)." per month.
+
+";
+  $reply  .= "Your 3-month emergency fund target is £".number_format($target3,2).". ";
+  $reply  .= $gap3 <= 0 ? "You are already there.
+" : "You have £".number_format($savings,2)." saved, so you need £".number_format($gap3,2)." more - about {$months3} month".($months3 == 1 ? "" : "s")." at £".number_format($monthlySaving,2)."/month.
+";
+  $reply  .= "Your 6-month target is £".number_format($target6,2).". ";
+  $reply  .= $gap6 <= 0 ? "You are already there.
+
+" : "You need £".number_format($gap6,2)." more - about {$months6} month".($months6 == 1 ? "" : "s").".
+
+";
+  $reply  .= "After saving £".number_format($monthlySaving,2).", you would still have around £".number_format(max(0,$surplus-$monthlySaving),2)." left each month.";
+  return $reply;
+}
+
 function respond(PDO $db, int $sid, array $state, string $reply, ?array $calc, array $qr, ?array $comparison_calc = null): void {
   $state['last_quick_replies'] = $qr;
   $stmt = $db->prepare('INSERT INTO conversation_state (session_id, state) VALUES (?, ?) ON DUPLICATE KEY UPDATE state=VALUES(state), updated_at=NOW()');
@@ -241,6 +276,24 @@ if ($state['step'] === 'active' && !empty($state['expenses']) && preg_match('/(\
     $reply3  .= "To reach £".number_format($target_b,2).": you need £".number_format(max(0,$target_b-$current),2)." more.";
     respond($db,$session_id,$state,$reply3,null,['Check another item','Run a stress test','Reset budget']);
   }
+}
+
+// Direct savings recommendation
+if ($state['step'] === 'active' && !empty($state['income']) && !empty($state['expenses']) && !$num
+  && preg_match('/how much.*save|what.*save.*month|recommend.*save|good amount.*save|save.*month/i', $message)) {
+  $surplus4  = floatval($state['income']) - floatval($state['expenses']);
+  $savings4  = floatval($state['savings'] ?? 0);
+  $target3   = floatval($state['expenses']) * 3;
+  $target6   = floatval($state['expenses']) * 6;
+  $suggest   = min(round($surplus4 * 0.5), $surplus4);
+  $months3   = $suggest > 0 ? (int)ceil(max(0,$target3-$savings4)/$suggest) : 0;
+  $months6   = $suggest > 0 ? (int)ceil(max(0,$target6-$savings4)/$suggest) : 0;
+  $reply4    = "Based on your surplus of £".number_format($surplus4,2)."/month, here is a simple savings plan:\n\n";
+  $reply4   .= "Save £".number_format($suggest,2)."/month (50% of surplus):\n";
+  $reply4   .= "- 3-month emergency fund (£".number_format($target3,2)."): reached in ".$months3." months\n";
+  $reply4   .= "- 6-month emergency fund (£".number_format($target6,2)."): reached in ".$months6." months\n\n";
+  $reply4   .= "You still have £".number_format($surplus4-$suggest,2)."/month left for spending or other goals.";
+  respond($db,$session_id,$state,$reply4,null,['Check another item','Run a stress test','Reset budget']);
 }
 
 // Conversational opener (including "how much" questions with numbers)

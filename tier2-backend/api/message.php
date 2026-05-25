@@ -176,6 +176,15 @@ if (preg_match('/^(no|nope|cancel|never mind|actually no|no i dont|dont want|cha
   }
 }
 
+// ── Memory confirm (must run before conversational guards) ─────────────────
+if (!empty($state['needs_memory_confirm'])) {
+  $state['needs_memory_confirm'] = false;
+  $state['mode'] = '';
+  $surplus = $state['income'] - $state['expenses'];
+  $bot_reply = "Welcome back! Here are your saved figures:\n\n📊 Income: £".number_format($state['income'],2)." | Expenses: £".number_format($state['expenses'],2)." | Savings: £".number_format($state['savings'],2)."\n💰 Monthly surplus: £".number_format($surplus,2)."\n\nAre these still correct, or would you like to update them?";
+  respond($db,$session_id,$state,$bot_reply,null,['Yes, correct','No, update them','Other']);
+}
+
 // ── Stress test fallback (before income_change handler) ────────────────────
 $inConvoMode = !empty($state['mode']) && in_array($state['mode'], ['post_stress','item_check']);
 if (!$inConvoMode && !in_array('stress_test',$intents) && preg_match('/\bstress test\b|\d+\s*%\s*(drop|loss|cut)|\btotal loss of income\b|income drop|salary cut|redundan|laid off/i', $message)) {
@@ -218,8 +227,24 @@ if (!empty($state['mode']) && !$num && $state['step'] === 'active' && preg_match
 if ($num && $state['step'] === 'active' && preg_match('/^(i |we |my |maybe i|i think|i could|i would|i might|i should|i can |ill |i\'d |i\'m )/i', $lower)) {
   respond($db,$session_id,$state,generateReply($message,$state,$history),null,['Check another item','Run a stress test','Reset budget']);
 }
-// Conversational opener
-if (!$num && $state['step'] === 'active' && preg_match('/^(what|why|how|when|where|who|which|ok|sure|great|thanks|thank you|concern|worried|fine|bad|alright|sounds|feel|agree|disagree|not really|absolutely|of course|exactly|thats|that is|i see|i know|makes sense|tell me|explain|really|seriously|omg|wow|oh|ah|hm|hmm)/i', $lower)) {
+// Direct emergency fund calculation
+if ($state['step'] === 'active' && !empty($state['expenses']) && preg_match('/(\d+)\s*(?:to|-)\s*(\d+)\s*months?.*(?:expense|saving|fund|emergency)|(?:emergency|fund|saving).*(\d+)\s*(?:to|-)\s*(\d+)\s*months?|how much.*(\d+)\s*(?:to|-)\s*(\d+)\s*months?/i', $message, $em)) {
+  $months_a = intval($em[1] ?: $em[3] ?: $em[5]);
+  $months_b = intval($em[2] ?: $em[4] ?: $em[6]);
+  if ($months_a > 0 && $months_b > 0) {
+    $target_a = $state['expenses'] * $months_a;
+    $target_b = $state['expenses'] * $months_b;
+    $current  = floatval($state['savings'] ?? 0);
+    $reply3   = "{$months_a} months of expenses = £".number_format($target_a,2)." | {$months_b} months = £".number_format($target_b,2).".\n\n";
+    $reply3  .= "You currently have £".number_format($current,2)." saved.\n";
+    $reply3  .= "To reach £".number_format($target_a,2).": you need £".number_format(max(0,$target_a-$current),2)." more.\n";
+    $reply3  .= "To reach £".number_format($target_b,2).": you need £".number_format(max(0,$target_b-$current),2)." more.";
+    respond($db,$session_id,$state,$reply3,null,['Check another item','Run a stress test','Reset budget']);
+  }
+}
+
+// Conversational opener (including "how much" questions with numbers)
+if ($state['step'] === 'active' && preg_match('/^(what|why|how|when|where|who|which|ok|sure|great|thanks|thank you|concern|worried|fine|bad|alright|sounds|feel|agree|disagree|not really|absolutely|of course|exactly|thats|that is|i see|i know|makes sense|tell me|explain|really|seriously|omg|wow|oh|ah|hm|hmm)/i', $lower)) {
   respond($db,$session_id,$state,generateReply($message,$state,$history),null,['Check another item','Run a stress test','Reset budget']);
 }
 
@@ -332,15 +357,6 @@ if ($state['step'] === 'savings') {
     respond($db,$session_id,$state,$bot,null,['A laptop £800','A phone £600','A car £10k','A subscription','Other']);
   }
   respond($db,$session_id,$state,generateReply($message,$state,$history),null,['£0','£500','£1000','Other']);
-}
-
-// ── Memory confirm ─────────────────────────────────────────────────────────
-if (!empty($state['needs_memory_confirm'])) {
-  $state['needs_memory_confirm'] = false;
-  $state['mode'] = '';
-  $surplus = $state['income'] - $state['expenses'];
-  $bot_reply = "Welcome back! Here are your saved figures:\n\n📊 Income: £".number_format($state['income'],2)." | Expenses: £".number_format($state['expenses'],2)." | Savings: £".number_format($state['savings'],2)."\n💰 Monthly surplus: £".number_format($surplus,2)."\n\nAre these still correct, or would you like to update them?";
-  respond($db,$session_id,$state,$bot_reply,null,['Yes, correct','No, update them','Other']);
 }
 
 // ── Compare trigger ────────────────────────────────────────────────────────

@@ -559,6 +559,65 @@ if (in_array('stress_test',$intents) && !empty($state['income']) && !empty($stat
   }
 }
 
+// After stress-test/supportive conversation, do not treat savings-plan replies as purchase items
+if (
+  $state['step'] === 'active'
+  && !empty($state['mode'])
+  && in_array($state['mode'], ['post_stress', 'item_check'], true)
+  && preg_match('/(save|saving|savings|emergency|fund|pot|monthly|per month|set aside|put aside|build|secure|safer|stressful|worried|anxious)/i', $message)
+  && !preg_match('/(buy|afford|purchase|check|compare|costs?|price)/i', $message)
+) {
+  $state['mode'] = 'item_check';
+  $surplus = floatval($state['income']) - floatval($state['expenses']);
+  $monthlySaving = ($num !== null && $num > 0) ? min(floatval($num), max(0, $surplus)) : null;
+  if ($monthlySaving !== null) {
+    $target3 = floatval($state['expenses']) * 3;
+    $target6 = floatval($state['expenses']) * 6;
+    $current = floatval($state['savings']);
+    $to3 = max(0, $target3 - $current);
+    $to6 = max(0, $target6 - $current);
+    $months3 = $monthlySaving > 0 ? (int)ceil($to3 / $monthlySaving) : null;
+    $months6 = $monthlySaving > 0 ? (int)ceil($to6 / $monthlySaving) : null;
+    $reply = "That sounds like a sensible amount. If you save £".number_format($monthlySaving,2)." per month into your emergency pot:
+
+";
+    $reply .= "- 3 months of expenses would be £".number_format($target3,2);
+    $reply .= $to3 <= 0 ? " - you are already there.
+" : " - about {$months3} month".($months3 === 1 ? "" : "s")." from now.
+";
+    $reply .= "- 6 months of expenses would be £".number_format($target6,2);
+    $reply .= $to6 <= 0 ? " - you are already there.
+
+" : " - about {$months6} month".($months6 === 1 ? "" : "s")." from now.
+
+";
+    $reply .= "With your current surplus of £".number_format($surplus,2).", saving £".number_format($monthlySaving,2)." monthly still leaves about £".number_format($surplus - $monthlySaving,2)." spare each month.";
+    respond($db,$session_id,$state,$reply,null,['Check another item','Run a stress test','Reset budget']);
+  }
+  respond($db,$session_id,$state,generateReply($message,$state,$history),null,['Check another item','Run a stress test','Reset budget']);
+}
+
+// Use LLM flags to detect non-item messages
+if (($is_emotional || $is_unrelated || $is_question_only) && !$num && $state['step'] === 'active' && empty($state['comparing']) && empty($state['compare_base'])) {
+  $state['mode'] = 'item_check';
+  respond($db,$session_id,$state,generateReply($message,$state,$history),null,['Check another item','Run a stress test','Reset budget']);
+}
+
+// When mode is set and user says short reply - continue conversation
+if (!empty($state['mode']) && !$num && $state['step'] === 'active' && preg_match('/^(yes|no|yeah|nah|ok|sure|i see|makes sense|i dont know|not sure|maybe|probably|definitely|absolutely|of course|i guess|i think|tell me more|go on|and then|so what|what now)/i', $lower)) {
+  respond($db,$session_id,$state,generateReply($message,$state,$history),null,['Check another item','Run a stress test','Reset budget']);
+}
+
+// Block first-person statements with numbers from item extraction
+if ($num && $state['step'] === 'active' && preg_match('/^(i |we |my |maybe i|perhaps |i think|i could|i would|i might|i should|i can |ill |i'd |i'm )/i', $lower)) {
+  respond($db,$session_id,$state,generateReply($message,$state,$history),null,['Check another item','Run a stress test','Reset budget']);
+}
+
+// Block conversational openers from item extraction
+if (!$num && $state['step'] === 'active' && preg_match('/^(what|why|how|when|where|who|which|ok|sure|great|thanks|thank you|definitely|concern|worried|fine|bad|alright|sounds|feel|agree|disagree|not really|absolutely|of course|exactly|thats|that is|that's|i see|i know|makes sense|tell me|explain|really|seriously|omg|wow|oh|ah|hm|hmm)/i', $lower)) {
+  respond($db,$session_id,$state,generateReply($message,$state,$history),null,['Check another item','Run a stress test','Reset budget']);
+}
+
 if (!empty($state['income']) && !empty($state['expenses']) && isset($state['savings']) && !$action_taken) {
   $new_name = null;
   $new_cost = null;

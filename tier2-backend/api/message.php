@@ -242,8 +242,8 @@ if (!empty($state['active_goal']['name']) && empty($state['active_goal']['cost']
 
 // ── Conversational message guards (all flags now defined) ──────────────────
 // Post-stress/item_check mode: any non-stress message goes to conversation
-if (!empty($state['mode']) && in_array($state['mode'], ['stress_test','post_stress','item_check']) && !$num) {
-  $isExplicit = preg_match('/^(run a stress test|20% income drop|50% income drop|total loss of income|\d+% (drop|loss))/i', trim($message));
+if (!empty($state['mode']) && in_array($state['mode'], ['stress_test','post_stress','item_check','conversation']) && !$num) {
+  $isExplicit = preg_match('/^(run a stress test|20% income drop|50% income drop|total loss of income|\d+% (drop|loss)|compare|something else|check another|reset budget)/i', trim($message));
   if (!$isExplicit && !in_array('stress_test', $intents)) {
     $state['mode'] = 'item_check';
     respond($db,$session_id,$state,generateReply($message,$state,$history),null,['Check another item','Run a stress test','Reset budget']);
@@ -258,6 +258,28 @@ if (($is_emotional || $is_unrelated || $is_question_only) && !$num && $state['st
 if (!empty($state['mode']) && !$num && $state['step'] === 'active' && preg_match('/^(yes|no|yeah|nah|ok|sure|i see|makes sense|i dont know|not sure|maybe|probably|definitely|absolutely|of course|i guess|i think|tell me more|go on)/i', $lower)) {
   respond($db,$session_id,$state,generateReply($message,$state,$history),null,['Check another item','Run a stress test','Reset budget']);
 }
+// Long messages with numbers are conversations not item checks
+if ($num && $state['step'] === 'active' && str_word_count($message) > 5 && !preg_match('/^(check|compare|afford|buy|get|purchase)\b/i', $lower) && empty($state['compare_base'])) {
+  respond($db,$session_id,$state,generateReply($message,$state,$history),null,['Check another item','Run a stress test','Reset budget']);
+}
+
+// Get last bot message to understand topic context
+$last_bot = '';
+foreach (array_reverse($history) as $h) {
+  if ($h['role'] === 'bot') { $last_bot = $h['content'] ?? ''; break; }
+}
+$last_was_conversational = !empty($last_bot)
+  && !preg_match('/here is your result|side by side|stress test shows|LOW RISK|MODERATE RISK|HIGH RISK/i', $last_bot)
+  && preg_match('/\?$|\? |would you like|how does|how do you|what do you|feel|think|consider|explore|focus/i', $last_bot);
+
+// If last bot message was conversational and this message has a number but looks conversational - stay in conversation
+if ($num && $state['step'] === 'active' && $last_was_conversational && empty($state['compare_base'])) {
+  $looksLikeItem = str_word_count($message) <= 3 && !preg_match('/^(so|but|and|or|if|is|it|that|this|yes|no|how|what|why|i |i\')/i', $lower);
+  if (!$looksLikeItem) {
+    respond($db,$session_id,$state,generateReply($message,$state,$history),null,['Check another item','Run a stress test','Reset budget']);
+  }
+}
+
 // First-person with number
 if ($num && $state['step'] === 'active' && preg_match('/^(i\'?m|i |we |my |maybe i|i think|i could|i would|i might|i should|i can |ill |i\'d )/i', $lower)) {
   respond($db,$session_id,$state,generateReply($message,$state,$history),null,['Check another item','Run a stress test','Reset budget']);
@@ -414,6 +436,7 @@ if ($state['step'] === 'savings') {
 
 // ── Compare trigger ────────────────────────────────────────────────────────
 if (preg_match('/compare|something else|alternative|versus|vs/i', $message) && $state['step'] === 'active' && !empty($state['checks']) && !$num) {
+  $state['mode']         = '';
   $last = $state['checks'][count($state['checks'])-1];
   $state['comparing']    = true;
   $state['active_goal']  = null;
@@ -669,6 +692,7 @@ if (!empty($state['income']) && !empty($state['expenses']) && isset($state['savi
   }
 
   if ($new_name && $new_cost) {
+    $state['mode'] = '';
     $state['active_goal'] = ['name'=>$new_name,'cost'=>$new_cost,'type'=>$new_type];
     $already_done = false; $matched_check = null;
     foreach ($state['checks'] as $c) {
@@ -703,6 +727,8 @@ if ($show_again && !empty($state['checks'])) {
   respond($db,$session_id,$state,'Here is the result for '.$last_check['item_name'].' again.',$calc_again,$quick_replies);
 }
 
+// Track that we're in conversation mode so next message is handled correctly
+if (empty($system_results)) $state['mode'] = 'conversation';
 $bot_reply = generateReply($message, $state, $history, $system_results);
 
 $comparison_calc = null;

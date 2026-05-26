@@ -259,7 +259,7 @@ if (!empty($state['mode']) && !$num && $state['step'] === 'active' && preg_match
   respond($db,$session_id,$state,generateReply($message,$state,$history),null,['Check another item','Run a stress test','Reset budget']);
 }
 // First-person with number
-if ($num && $state['step'] === 'active' && preg_match('/^(i |we |my |maybe i|i think|i could|i would|i might|i should|i can |ill |i\'d |i\'m )/i', $lower)) {
+if ($num && $state['step'] === 'active' && preg_match('/^(i\'?m|i |we |my |maybe i|i think|i could|i would|i might|i should|i can |ill |i\'d )/i', $lower)) {
   respond($db,$session_id,$state,generateReply($message,$state,$history),null,['Check another item','Run a stress test','Reset budget']);
 }
 // Direct emergency fund calculation

@@ -198,6 +198,23 @@ if (preg_match('/^run a stress test$/i', $lower)) {
   $intents[]            = 'stress_test';
 }
 
+// User wants general financial advice - guide them to the tools
+if ($state['step'] === 'active' && !$num && empty($state['comparing']) && empty($state['compare_base'])
+  && preg_match('/improve|advice|help|guidance|tips|better|finances|financial|money|budget/i', $message)
+  && !preg_match('/check|compare|stress|reset/i', $message)) {
+  $surplus = floatval($state['income']) - floatval($state['expenses']);
+  $reply_gen = "Happy to help you improve your finances. Here is where you stand:\n\n";
+  $reply_gen .= "📊 Monthly surplus: £".number_format($surplus,2)."\n";
+  $reply_gen .= "💰 Savings: £".number_format(floatval($state['savings']),2)."\n\n";
+  $reply_gen .= "A few things you can do right now:\n";
+  $reply_gen .= "- Check if a purchase is affordable before buying it\n";
+  $reply_gen .= "- Run a stress test to see how you would cope with an income drop\n";
+  $reply_gen .= "- Ask me how much you should save for an emergency fund\n\n";
+  $reply_gen .= "What would you like to start with?";
+  $state['mode'] = 'item_check';
+  respond($db,$session_id,$state,$reply_gen,null,['Check another item','Run a stress test','Reset budget']);
+}
+
 // Compare trigger
 if (preg_match('/compare|something else|alternative|versus|vs/i', $message) && $state['step'] === 'active' && !empty($state['checks']) && !$num) {
   $state['mode']         = '';
@@ -264,7 +281,12 @@ if (!empty($state['mode']) && in_array($state['mode'], ['stress_test','post_stre
   $isExplicit = preg_match('/^(run a stress test|20% income drop|50% income drop|total loss of income|\d+% (drop|loss)|compare|something else|check another|reset budget)/i', trim($message));
   if (!$isExplicit && !in_array('stress_test', $intents)) {
     $state['mode'] = 'item_check';
-    respond($db,$session_id,$state,generateReply($message,$state,$history),null,['Check another item','Run a stress test','Reset budget']);
+    $reply_stress = generateReply($message,$state,$history);
+    if (!$reply_stress || strpos($reply_stress, 'Could you tell me') !== false) {
+      $surplus = floatval($state['income']) - floatval($state['expenses']);
+      $reply_stress = "That is understandable - a total loss of income would be tough for anyone. The good news is your surplus of £".number_format($surplus,2)." gives you room to build a safety net. Would you like to explore how much to save each month?";
+    }
+    respond($db,$session_id,$state,$reply_stress,null,['Check another item','Run a stress test','Reset budget']);
   }
 }
 // LLM flags
@@ -298,8 +320,9 @@ if ($num && $state['step'] === 'active' && $last_was_conversational && empty($st
   }
 }
 
-// First-person with number
-if ($num && $state['step'] === 'active' && preg_match('/^(i\'?m|i |we |my |maybe i|i think|i could|i would|i might|i should|i can |ill |i\'d )/i', $lower)) {
+// First-person with number - but not savings discussions
+if ($num && $state['step'] === 'active' && preg_match('/^(i\'?m|i |we |my |maybe i|i think|i could|i would|i might|i should|i can |ill |i\'d )/i', $lower)
+  && !preg_match('/(save|saving|savings|emergency|fund|pot)/i', $message)) {
   respond($db,$session_id,$state,generateReply($message,$state,$history),null,['Check another item','Run a stress test','Reset budget']);
 }
 // Direct emergency fund calculation

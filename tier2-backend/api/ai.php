@@ -202,7 +202,7 @@ HARD RULES:
   // NO history passed - LLM gets facts only, zero partial sight of old calculations
   // Full session history - calc lines stripped in chat.php so LLM cannot re-reason numbers
   $result = callGroq($system, $message, 'llama-3.3-70b-versatile', 220, $history);
-  return $result ?? "Could you say that again?";
+  return $result ?? "Could you tell me a bit more about what you'd like to check or discuss?";
 }
 
 // ============================================================

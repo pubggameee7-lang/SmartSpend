@@ -197,6 +197,23 @@ if (preg_match('/^run a stress test$/i', $lower)) {
   $intents[]            = 'stress_test';
 }
 
+// ── Compare trigger ────────────────────────────────────────────────────────
+if (preg_match('/compare|something else|alternative|versus|vs/i', $message) && $state['step'] === 'active' && !empty($state['checks']) && !$num) {
+  $state['mode']         = '';
+  $last = $state['checks'][count($state['checks'])-1];
+  $state['comparing']    = true;
+  $state['active_goal']  = null;
+  if (count($state['checks']) >= 2) {
+    $prev_items = [];
+    foreach (array_slice($state['checks'], -5) as $c) {
+      $prev_items[] = $c['item_name'].' £'.number_format($c['item_price'],0);
+    }
+    respond($db,$session_id,$state,'Sure - pick an item to compare against, or type a new item and price below:',null,$prev_items);
+  } else {
+    respond($db,$session_id,$state,'Sure - what item would you like to compare with the '.$last['item_name'].'? Tell me the item name and price.',null,[]);
+  }
+}
+
 // ── Handle reset cancellation ──────────────────────────────────────────────
 if (preg_match('/^(no|nope|cancel|never mind|actually no|no i dont|dont want|changed my mind)/i', $lower) && $state['step'] === 'income' && empty($state['income'])) {
   $stmt2 = $db->prepare('SELECT saved_income, saved_expenses, saved_savings FROM users WHERE id = ?');
@@ -241,8 +258,8 @@ if (!empty($state['active_goal']['name']) && empty($state['active_goal']['cost']
 }
 
 // ── Conversational message guards (all flags now defined) ──────────────────
-// Post-stress/item_check mode: any non-stress message goes to conversation
-if (!empty($state['mode']) && in_array($state['mode'], ['stress_test','post_stress','item_check','conversation']) && !$num) {
+// Post-stress mode: any non-stress, non-compare message goes to conversation
+if (!empty($state['mode']) && in_array($state['mode'], ['stress_test','post_stress']) && !$num && empty($state['comparing']) && empty($state['compare_base'])) {
   $isExplicit = preg_match('/^(run a stress test|20% income drop|50% income drop|total loss of income|\d+% (drop|loss)|compare|something else|check another|reset budget)/i', trim($message));
   if (!$isExplicit && !in_array('stress_test', $intents)) {
     $state['mode'] = 'item_check';
@@ -273,7 +290,7 @@ $last_was_conversational = !empty($last_bot)
   && preg_match('/\?$|\? |would you like|how does|how do you|what do you|feel|think|consider|explore|focus/i', $last_bot);
 
 // If last bot message was conversational and this message has a number but looks conversational - stay in conversation
-if ($num && $state['step'] === 'active' && $last_was_conversational && empty($state['compare_base'])) {
+if ($num && $state['step'] === 'active' && $last_was_conversational && empty($state['compare_base']) && empty($state['comparing'])) {
   $looksLikeItem = str_word_count($message) <= 3 && !preg_match('/^(so|but|and|or|if|is|it|that|this|yes|no|how|what|why|i |i\')/i', $lower);
   if (!$looksLikeItem) {
     respond($db,$session_id,$state,generateReply($message,$state,$history),null,['Check another item','Run a stress test','Reset budget']);
@@ -300,22 +317,14 @@ if ($state['step'] === 'active' && !empty($state['expenses']) && preg_match('/(\
   }
 }
 
-// Direct savings recommendation
-if ($state['step'] === 'active' && !empty($state['income']) && !empty($state['expenses']) && !$num
-  && preg_match('/how much.*save|what.*save.*month|recommend.*save|good amount.*save|save.*month/i', $message)) {
-  $surplus4  = floatval($state['income']) - floatval($state['expenses']);
-  $savings4  = floatval($state['savings'] ?? 0);
-  $target3   = floatval($state['expenses']) * 3;
-  $target6   = floatval($state['expenses']) * 6;
-  $suggest   = min(round($surplus4 * 0.5), $surplus4);
-  $months3   = $suggest > 0 ? (int)ceil(max(0,$target3-$savings4)/$suggest) : 0;
-  $months6   = $suggest > 0 ? (int)ceil(max(0,$target6-$savings4)/$suggest) : 0;
-  $reply4    = "Based on your surplus of £".number_format($surplus4,2)."/month, here is a simple savings plan:\n\n";
-  $reply4   .= "Save £".number_format($suggest,2)."/month (50% of surplus):\n";
-  $reply4   .= "- 3-month emergency fund (£".number_format($target3,2)."): reached in ".$months3." months\n";
-  $reply4   .= "- 6-month emergency fund (£".number_format($target6,2)."): reached in ".$months6." months\n\n";
-  $reply4   .= "You still have £".number_format($surplus4-$suggest,2)."/month left for spending or other goals.";
-  respond($db,$session_id,$state,$reply4,null,['Check another item','Run a stress test','Reset budget']);
+// Direct savings recommendation - BEFORE conversational opener
+if ($state['step'] === 'active' && !empty($state['income']) && !empty($state['expenses'])
+  && preg_match('/how much.*save|how much.*have saved|how much.*need.*saved|what.*save.*month|recommend.*save|good amount.*save|save.*month|should i save|how much should/i', $message)
+  && !preg_match('/(buy|afford|purchase|check|compare|costs?|price)/i', $message)) {
+  $state['mode']  = 'item_check';
+  $surplus_es     = floatval($state['income']) - floatval($state['expenses']);
+  $monthlySaving5 = ($num !== null && $num > 0) ? min(floatval($num), max(0, $surplus_es)) : null;
+  respond($db,$session_id,$state,emergencySavingsAdvice($state,$monthlySaving5),null,['Check another item','Run a stress test','Reset budget']);
 }
 
 // Conversational opener (including "how much" questions with numbers)
@@ -434,22 +443,7 @@ if ($state['step'] === 'savings') {
   respond($db,$session_id,$state,generateReply($message,$state,$history),null,['£0','£500','£1000','Other']);
 }
 
-// ── Compare trigger ────────────────────────────────────────────────────────
-if (preg_match('/compare|something else|alternative|versus|vs/i', $message) && $state['step'] === 'active' && !empty($state['checks']) && !$num) {
-  $state['mode']         = '';
-  $last = $state['checks'][count($state['checks'])-1];
-  $state['comparing']    = true;
-  $state['active_goal']  = null;
-  if (count($state['checks']) >= 2) {
-    $prev_items = [];
-    foreach (array_slice($state['checks'], -5) as $c) {
-      $prev_items[] = $c['item_name'].' £'.number_format($c['item_price'],0);
-    }
-    respond($db,$session_id,$state,'Sure - pick an item to compare against, or type a new item and price below:',null,$prev_items);
-  } else {
-    respond($db,$session_id,$state,'Sure - what item would you like to compare with the '.$last['item_name'].'? Tell me the item name and price.',null,[]);
-  }
-}
+
 
 // ── Update figures ─────────────────────────────────────────────────────────
 if (preg_match('/^(no, update|no update|update them|update|change figures|different figures|wrong figures|start fresh|new figures|update all|change all|reset all|all|everything|change|new|different)/i', $lower) && $state['step'] === 'active' && !empty($state['income']) && !$goal_name_hint && !$num) {
@@ -661,7 +655,15 @@ if (!empty($state['income']) && !empty($state['expenses']) && isset($state['savi
   }
 
   if ($goal_name_hint && $num && $num > 0 && !$loan_mentioned && !$expense_change && !$sub_mentioned && !$is_extra_saving) {
-    $new_name = cleanItemName($goal_name_hint);
+   
+      
+      
+      
+      
+      $new_name = cleanItemName($goal_name_hint);
+error_log("DEBUG name: " . $goal_name_hint . " -> " . $new_name);
+      
+      
     $new_cost = $num;
     $new_type = $goal_type_hint ?? 'one-time';
   } elseif (!$goal_name_hint && $num && $num > 0 && !empty($state['active_goal']['name']) && empty($state['active_goal']['cost']) && !$loan_mentioned && !$expense_change) {
@@ -727,8 +729,8 @@ if ($show_again && !empty($state['checks'])) {
   respond($db,$session_id,$state,'Here is the result for '.$last_check['item_name'].' again.',$calc_again,$quick_replies);
 }
 
-// Track that we're in conversation mode so next message is handled correctly
-if (empty($system_results)) $state['mode'] = 'conversation';
+// Track conversation mode only when no item calc, no comparison, not in compare flow
+if (empty($system_results) && !$calculation && empty($comparison_calc) && empty($state['comparing']) && empty($state['compare_base'])) $state['mode'] = 'conversation';
 $bot_reply = generateReply($message, $state, $history, $system_results);
 
 $comparison_calc = null;

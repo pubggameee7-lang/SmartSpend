@@ -79,8 +79,9 @@ $history = array_values(array_filter($history_raw, function($m) use ($raw_messag
 }));
 
 function cleanItemName(string $name): string {
-  $clean = preg_replace('/\s+£?\d[\d,.]*k?\s*$/i', '', trim($name));
-  $clean = trim(preg_replace('/\s+/', ' ', $clean));
+  $clean = preg_replace('/[\s\xA0]+£?\d[\d,.]*k?\s*$/iu', '', trim($name));
+  $clean = preg_replace('/\s+/', ' ', $clean);
+  $clean = trim($clean);
   return strlen($clean) > 0 ? $clean : $name;
 }
 
@@ -365,7 +366,7 @@ if ($correction_applicable) {
   $state['step'] = $prev;
   $bot_map = ['income'=>'No problem - what is your monthly income after tax?','expenses'=>'No problem - what are your total monthly expenses?'];
   $bot = isset($bot_map[$prev]) ? $bot_map[$prev] : 'No problem - what would you like to correct?';
-  respond($db,$session_id,$state,$bot,null,[]);
+  respond($db,$session_id,$state,$bot,null,['Other']);
 }
 
 // Greeting / step handlers
@@ -685,7 +686,8 @@ if (!empty($state['income']) && !empty($state['expenses']) && isset($state['savi
       respond($db,$session_id,$state,'What item would you like to check next, and how much does it cost?',null,[]);
     }
   } elseif (in_array('affordability_check',$intents) && !$refs_prev_goal && !$loan_mentioned && !$expense_change && !$is_extra_saving && $num && $num > 0) {
-    $new_name = cleanItemName($goal_name_hint ?? ($state['active_goal']['name'] ?? ''));
+    $resolved = $goal_name_hint ?: $msg_name;
+    $new_name = $resolved ? cleanItemName($resolved) : '';
     $new_cost = $num;
     $new_type = $goal_type_hint ?? 'one-time';
   }

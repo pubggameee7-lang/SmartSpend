@@ -320,8 +320,13 @@ if ($state['step'] === 'active' && !empty($state['expenses']) && preg_match('/(\
 
 // Direct savings recommendation - BEFORE conversational opener
 if ($state['step'] === 'active' && !empty($state['income']) && !empty($state['expenses'])
-  && preg_match('/how much.*save|how much.*have saved|how much.*need.*saved|what.*save.*month|recommend.*save|good amount.*save|save.*month|should i save|how much should|if i save|how long.*save|how long.*take.*save|how long.*reach|how many months.*save/i', $message)
-  && !preg_match('/(buy|afford|purchase|check|compare|costs?|price)/i', $message)) {
+  && !$goal_name_hint && empty($state['comparing']) && empty($state['compare_base'])
+  && (
+    (in_array('saving_time',$intents) || in_array('custom_savings_calc',$intents))
+    || preg_match('/how much.*save|how much.*have saved|how much.*need.*saved|what.*save.*month|recommend.*save|good amount.*save|save.*month|should i save|how much should|if i save|how long.*save|how long.*take.*save|how long.*reach|how many months.*save/i', $message)
+  )
+  && !preg_match('/(buy|afford|purchase|check|compare|costs?|price)/i', $message)
+  && !in_array('affordability_check', $intents)) {
   $state['mode']  = 'item_check';
   $surplus_es     = floatval($state['income']) - floatval($state['expenses']);
   $monthlySaving5 = ($num !== null && $num > 0) ? min(floatval($num), max(0, $surplus_es)) : null;

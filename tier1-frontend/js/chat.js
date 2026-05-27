@@ -551,13 +551,13 @@ async function loadSessionMessages(sessionId, el) {
         if (compCalc) {
           // Show individual full result card first
           var riskLabel2 = calc && calc.risk_level === 'green' ? 'Good news' : calc && calc.risk_level === 'yellow' ? 'Heads up' : 'Warning';
-          addMessage(msg.role, riskLabel2 + ' - here is your result for ' + (calc ? calc.item_name : '') + '.', calc);
+          addMessage(msg.role, riskLabel2 + ' - here is your result for ' + (calc ? calc.item_name : '') + '.', calc, true);
           // Then comparison side by side
-          addMessage(msg.role, 'Here is your side by side comparison:', null);
+          addMessage(msg.role, 'Here is your side by side comparison:', null, true);
           var compWrap = chatBox.querySelector('.message.bot:last-child .bubble');
           if (compWrap) compWrap.appendChild(buildComparisonCard(compCalc, calc));
         } else {
-          addMessage(msg.role, msg.content, calc);
+          addMessage(msg.role, msg.content, calc, true);
         }
       });
       if (data.last_quick_replies && data.last_quick_replies.length > 0) {
@@ -663,10 +663,10 @@ function exportResultPDF(calc) {
   win.document.close();
 }
 
-function addMessage(role, content, calculation = null) {
+function addMessage(role, content, calculation = null, skipConfetti = false) {
   const welcome = chatBox.querySelector('.welcome-msg');
   if (welcome) welcome.remove();
-  if (calculation && calculation.risk_level === 'green') launchConfetti();
+  if (!skipConfetti && calculation && calculation.risk_level === 'green') launchConfetti();
 
   const wrap     = document.createElement('div');
   wrap.className = `message ${role}`;

@@ -144,7 +144,7 @@ function runCalc(PDO $db, int $sid, int $uid, array &$state, string $name, float
   return ['label'=>$label,'name'=>$name,'ai_text'=>$ai,'calculation'=>array_merge($calc,['item_name'=>$name,'item_price'=>$cost,'item_type'=>$type])];
 }
 
-// Simple command detection (before any parsing) 
+// Simple command detection (before any parsing)
 if (preg_match('/^(reset|start over|restart)$/i', $lower)) {
   $state = ['step'=>'greeting','income'=>null,'expenses'=>null,'savings'=>null,'active_goal'=>null,'loan'=>null,'subscriptions'=>[],'checks'=>[],'emergency_fund_warned'=>false];
   respond($db,$session_id,$state,"No problem - let's start fresh. What is your monthly income after tax?",null,['£1500','£2000','£2500','£3000','Other']);
@@ -169,7 +169,7 @@ if (preg_match('/^reset budget$/i', $lower)) {
   respond($db,$session_id,$state,"No problem - let's start fresh. What is your monthly income after tax?",null,['£1500','£2000','£2500','£3000','Other']);
 }
 
-//  Parse numbers and extract intent (ALL in one place) 
+// Parse numbers and extract intent (ALL in one place)
 $num      = parseNumber($message);
 $interest = parseInterestRate($message);
 $term     = parseLoanTerm($message);
@@ -190,14 +190,14 @@ $is_question_only  = $ix['is_question_only'] ?? false;
 $is_emotional      = $ix['is_emotional'] ?? false;
 $is_unrelated      = $ix['is_unrelated'] ?? false;
 
-//  Run a stress test button 
+// Run a stress test button
 if (preg_match('/^run a stress test$/i', $lower)) {
   $state['mode']        = '';
   $state['active_goal'] = null;
   $intents[]            = 'stress_test';
 }
 
-//  Compare trigger
+// Compare trigger
 if (preg_match('/compare|something else|alternative|versus|vs/i', $message) && $state['step'] === 'active' && !empty($state['checks']) && !$num) {
   $state['mode']         = '';
   $last = $state['checks'][count($state['checks'])-1];
@@ -214,7 +214,7 @@ if (preg_match('/compare|something else|alternative|versus|vs/i', $message) && $
   }
 }
 
-// Handle reset cancellation 
+// Handle reset cancellation
 if (preg_match('/^(no|nope|cancel|never mind|actually no|no i dont|dont want|changed my mind)/i', $lower) && $state['step'] === 'income' && empty($state['income'])) {
   $stmt2 = $db->prepare('SELECT saved_income, saved_expenses, saved_savings FROM users WHERE id = ?');
   $stmt2->execute([$user_id]);
@@ -228,7 +228,7 @@ if (preg_match('/^(no|nope|cancel|never mind|actually no|no i dont|dont want|cha
   }
 }
 
-// ── Memory confirm (must run before conversational guards) 
+// Memory confirm (must run before conversational guards)
 if (!empty($state['needs_memory_confirm'])) {
   $state['needs_memory_confirm'] = false;
   $state['mode'] = '';
@@ -237,7 +237,7 @@ if (!empty($state['needs_memory_confirm'])) {
   respond($db,$session_id,$state,$bot_reply,null,['Yes, correct','No, update them','Other']);
 }
 
-//  Stress test fallback (before income_change handler) 
+// Stress test fallback (before income_change handler)
 $inConvoMode = !empty($state['mode']) && in_array($state['mode'], ['post_stress','item_check']);
 if (!$inConvoMode && !in_array('stress_test',$intents) && preg_match('/\bstress test\b|\d+\s*%\s*(drop|loss|cut)|\btotal loss of income\b|income drop|salary cut|redundan|laid off/i', $message)) {
   $intents[] = 'stress_test';
@@ -247,7 +247,7 @@ if (in_array('stress_test',$intents)) {
   $expense_change = false;
 }
 
-// ── Block income/expense change in comparison or waiting-for-price context ─
+// Block income/expense change in comparison or waiting-for-price context
 if (!empty($state['compare_base']) || !empty($state['comparing'])) {
   $income_change  = false;
   $expense_change = false;
@@ -257,7 +257,7 @@ if (!empty($state['active_goal']['name']) && empty($state['active_goal']['cost']
   $income_change  = false;
 }
 
-// Conversational message guards (all flags now defined) 
+// Conversational message guards (all flags now defined)
 // Post-stress mode: any non-stress, non-compare message goes to conversation
 if (!empty($state['mode']) && in_array($state['mode'], ['stress_test','post_stress']) && !$num && empty($state['comparing']) && empty($state['compare_base'])) {
   $isExplicit = preg_match('/^(run a stress test|20% income drop|50% income drop|total loss of income|\d+% (drop|loss)|compare|something else|check another|reset budget)/i', trim($message));
@@ -332,13 +332,13 @@ if ($state['step'] === 'active' && preg_match('/^(what|why|how|when|where|who|wh
   respond($db,$session_id,$state,generateReply($message,$state,$history),null,['Check another item','Run a stress test','Reset budget']);
 }
 
-//  Yes-confirm 
+// Yes-confirm
 if (preg_match('/^(yes|yep|yeah|correct|all correct|they are correct|yes correct|thats correct|looks correct|looks good|right|thats right|same|use these|yes use|confirm|all good|sounds good|perfect|that is correct)/i', $lower) && $state['step'] === 'active' && !empty($state['income']) && empty($state['mode']) && str_word_count($lower) <= 4) {
   $item_hint = !empty($state['active_goal']['name']) ? 'How much does the '.$state['active_goal']['name'].' cost?' : 'What would you like to check? Tell me the item and the price.';
   respond($db,$session_id,$state,'Great - '.$item_hint,null,[]);
 }
 
-//  Correction handler 
+// Correction handler
 $correction_applicable = false;
 if ($is_correction && $state['step'] === 'active' && empty($state['comparing']) && empty($state['compare_base'])) {
   if ($correction_field === 'income'   && !empty($state['income']))   $correction_applicable = true;
@@ -422,6 +422,11 @@ if ($state['step'] === 'expenses') {
 }
 
 if ($state['step'] === 'savings') {
+  if ($num !== null && $num >= 0 && $is_correction && $correction_field === 'expenses') {
+    $state['expenses'] = $num;
+    $surplus = $state['income'] - $num;
+    respond($db,$session_id,$state,'No worries - expenses corrected to £'.number_format($num,2).'. Surplus: £'.number_format($surplus,2).'. How much do you currently have saved?',null,['£0','£500','£1000','Other']);
+  }
   if ($num !== null && $num >= 0) {
     $state['savings'] = $num; $state['step'] = 'active';
     $db->prepare('UPDATE users SET saved_income=?, saved_expenses=?, saved_savings=? WHERE id=?')->execute([$state['income'],$state['expenses'],$num,$user_id]);
@@ -445,13 +450,13 @@ if ($state['step'] === 'savings') {
 
 
 
-// ── Update figures ─────────────────────────────────────────────────────────
+// Update figures
 if (preg_match('/^(no, update|no update|update them|update|change figures|different figures|wrong figures|start fresh|new figures|update all|change all|reset all|all|everything|change|new|different)/i', $lower) && $state['step'] === 'active' && !empty($state['income']) && !$goal_name_hint && !$num) {
   $state['income'] = null; $state['expenses'] = null; $state['savings'] = null; $state['step'] = 'income';
   respond($db,$session_id,$state,"No problem - let's update your figures. What is your monthly income after tax?",null,['£1500','£2000','£2500','£3000','Other']);
 }
 
-// ── System results ─────────────────────────────────────────────────────────
+// System results
 $system_results = [];
 $calculation    = null;
 $quick_replies  = ['Check another item','Run a stress test','Reset budget','Other'];
@@ -589,7 +594,7 @@ if ((in_array('custom_savings_calc',$intents) || in_array('saving_time',$intents
   }
 }
 
-// Stress test handler 
+// Stress test handler
 if (in_array('stress_test',$intents) && !empty($state['income']) && !empty($state['expenses']) && !$action_taken) {
   $state['mode'] = 'stress_test';
   $pct2        = null;
@@ -609,7 +614,7 @@ if (in_array('stress_test',$intents) && !empty($state['income']) && !empty($stat
   }
 }
 
-// Savings-plan guard (post-stress conversation with a number) 
+// Savings-plan guard (post-stress conversation with a number)
 if ($state['step'] === 'active' && !empty($state['mode']) && in_array($state['mode'], ['post_stress','item_check'], true)
   && preg_match('/(save|saving|savings|emergency|fund|pot|monthly|per month|set aside|put aside|build|secure|stressful|worried|anxious)/i', $message)
   && !preg_match('/(buy|afford|purchase|check|compare|costs?|price)/i', $message)) {
@@ -633,7 +638,7 @@ if ($state['step'] === 'active' && !empty($state['mode']) && in_array($state['mo
   respond($db,$session_id,$state,generateReply($message,$state,$history),null,['Check another item','Run a stress test','Reset budget']);
 }
 
-// Item affordability 
+// Item affordability
 if (!empty($state['income']) && !empty($state['expenses']) && isset($state['savings']) && !$action_taken) {
   $new_name = null; $new_cost = null; $new_type = 'one-time';
 
@@ -655,15 +660,7 @@ if (!empty($state['income']) && !empty($state['expenses']) && isset($state['savi
   }
 
   if ($goal_name_hint && $num && $num > 0 && !$loan_mentioned && !$expense_change && !$sub_mentioned && !$is_extra_saving) {
-   
-      
-      
-      
-      
-      $new_name = cleanItemName($goal_name_hint);
-error_log("DEBUG name: " . $goal_name_hint . " -> " . $new_name);
-      
-      
+    $new_name = cleanItemName($goal_name_hint);
     $new_cost = $num;
     $new_type = $goal_type_hint ?? 'one-time';
   } elseif (!$goal_name_hint && $num && $num > 0 && !empty($state['active_goal']['name']) && empty($state['active_goal']['cost']) && !$loan_mentioned && !$expense_change) {
@@ -677,7 +674,7 @@ error_log("DEBUG name: " . $goal_name_hint . " -> " . $new_name);
       $parsed_name = trim($m3[1]);
     }
     $generic = preg_match('/^(another item|something|an item|a thing|item|something else|total loss|loss of income|total loss of income|stress test|run a stress test)$/i', trim($parsed_name ?? ''));
-    if ($parsed_name && strlen($parsed_name) > 1 && !$generic) {
+    if ($parsed_name && strlen($parsed_name) > 1 && !$generic && str_word_count($parsed_name) <= 4) {
       $state['active_goal'] = ['name'=>$parsed_name,'cost'=>null,'type'=>$goal_type_hint??'one-time'];
       $state['force_name_parse'] = false;
       $parsed_name = cleanItemName($parsed_name);

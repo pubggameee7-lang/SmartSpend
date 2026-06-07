@@ -56,7 +56,7 @@ function callGroq(string $system, string $user, string $model = 'llama-3.3-70b-v
 // LLM classifies intent and extracts structure.
 // PHP does ALL number parsing separately.
 // LLM is NOT allowed to calculate or estimate anything.
-// ============================================================
+
 function extractIntent(string $message, array $state, array $history = []): array {
   $known  = "income=" . ($state['income'] ?? 'unknown');
   $known .= " expenses=" . ($state['expenses'] ?? 'unknown');
@@ -134,7 +134,7 @@ Return ONLY the JSON. No explanation. No text outside the JSON.';
 // LLM receives finished state + system calculation results.
 // LLM outputs natural language ONLY.
 // LLM is FORBIDDEN from producing any financial calculations.
-// ============================================================
+
 function generateReply(string $message, array $state, array $history = [], array $system_results = []): string {
   $surplus = (!empty($state['income']) && !empty($state['expenses']))
     ? $state['income'] - $state['expenses'] : null;
@@ -209,7 +209,7 @@ HARD RULES:
 
 // ============================================================
 // FINANCIAL ENGINE — deterministic PHP, zero LLM
-// ============================================================
+
 function calculate(float $income, float $expenses, float $savings, float $item_price, string $item_type): array {
   $surplus = $income - $expenses;
 
@@ -303,7 +303,7 @@ function calculateLoan(float $principal, float $annual_rate, int $months): array
 // ============================================================
 // PHP NUMBER PARSERS — single source of truth for all numbers
 // LLM never touches raw input for numerical extraction
-// ============================================================
+
 function parseNumber(string $msg): ?float {
   $clean = str_replace([',', '£', '$', '€'], '', $msg);
   // k suffix - number followed by k then non-alpha or end

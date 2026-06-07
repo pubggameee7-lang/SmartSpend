@@ -5,7 +5,7 @@ const loginForm    = document.getElementById('login-form');
 const registerForm = document.getElementById('register-form');
 const logoutBtn    = document.getElementById('logout-btn');
 
-// ── Helper: show/hide error ───────────────────────────────
+// Helper: show/hide error 
 function showError(msg) {
   errorMsg.textContent = msg;
   errorMsg.classList.remove('hidden');
@@ -15,14 +15,14 @@ function hideError() {
   errorMsg.classList.add('hidden');
 }
 
-// ── Get CSRF token from server ────────────────────────────
+//  Get CSRF token from server 
 async function getCSRFToken() {
   const res  = await fetch(`${API_BASE}/auth.php?action=csrf`);
   const data = await res.json();
   return data.token || '';
 }
 
-// ── Login ─────────────────────────────────────────────────
+//  Login
 if (loginForm) {
   loginForm.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -69,7 +69,7 @@ if (loginForm) {
   });
 }
 
-// ── Register ──────────────────────────────────────────────
+// Register
 if (registerForm) {
   registerForm.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -127,7 +127,7 @@ if (registerForm) {
   });
 }
 
-// ── Logout ────────────────────────────────────────────────
+// Logout
 if (logoutBtn) {
   logoutBtn.addEventListener('click', async () => {
     try {

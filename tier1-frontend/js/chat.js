@@ -1043,17 +1043,94 @@ newSessionBtn.addEventListener('click', function() {
 
 
 
-// Search - simple title filter
+// Search modal - Ctrl+K
+var searchModal = document.getElementById('search-modal');
+var searchModalInput = document.getElementById('search-modal-input');
+var searchModalResults = document.getElementById('search-modal-results');
+var searchModalClose = document.getElementById('search-modal-close');
+
+document.addEventListener('keydown', function(e) {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+    e.preventDefault();
+    searchModal.style.display = 'flex';
+    searchModalInput.value = '';
+    searchModalResults.innerHTML = '';
+    searchModalInput.focus();
+  }
+});
+
+if (searchModalClose) {
+  searchModalClose.addEventListener('click', function() { searchModal.style.display = 'none'; });
+}
+
+if (searchModalInput) {
+  searchModalInput.addEventListener('input', async function() {
+    var q = searchModalInput.value.toLowerCase().trim();
+    searchModalResults.innerHTML = '';
+    if (!q || q.length < 2) return;
+    var res = await fetch(`${API_BASE}/history.php?action=sessions`);
+    var data = await res.json();
+    if (!data.success) return;
+    var found = 0;
+    for (var s of data.sessions) {
+      var r = await fetch(`${API_BASE}/history.php?action=messages&session_id=${s.id}`);
+      var d = await r.json();
+      if (!d.success) continue;
+      var matches = d.messages.filter(function(m) {
+        return m.content.toLowerCase().includes(q);
+      });
+      if (s.title.toLowerCase().includes(q) || matches.length > 0) {
+        found++;
+        var section = document.createElement('div');
+        section.style.cssText = 'padding:10px 16px;border-bottom:1px solid var(--border);cursor:pointer;';
+        var title = document.createElement('div');
+        title.style.cssText = 'font-weight:600;font-size:13px;color:var(--text);margin-bottom:6px;';
+        title.textContent = s.title;
+        section.appendChild(title);
+        matches.slice(0, 2).forEach(function(m) {
+          var snippet = document.createElement('div');
+          snippet.style.cssText = 'font-size:12px;color:var(--text-muted);margin-bottom:4px;';
+          var content = m.content;
+          var idx = content.toLowerCase().indexOf(q);
+          var start = Math.max(0, idx - 40);
+          var end = Math.min(content.length, idx + q.length + 40);
+          var text = (start > 0 ? '...' : '') + content.slice(start, idx) + '<mark style="background:#B2EBF2;border-radius:2px;padding:0 2px;">' + content.slice(idx, idx + q.length) + '</mark>' + content.slice(idx + q.length, end) + (end < content.length ? '...' : '');
+          snippet.innerHTML = text;
+          section.appendChild(snippet);
+        });
+        var sid = s.id;
+        section.addEventListener('click', function() {
+          searchModal.style.display = 'none';
+          var items = document.querySelectorAll('.session-item');
+          var target = null;
+          items.forEach(function(item) { if (parseInt(item.dataset.sessionId) === sid) target = item; });
+          if (target) { loadSessionMessages(sid, target); target.scrollIntoView({behavior:'smooth',block:'center'}); }
+        });
+        section.addEventListener('mouseenter', function() { this.style.background = 'var(--bg)'; });
+        section.addEventListener('mouseleave', function() { this.style.background = ''; });
+        searchModalResults.appendChild(section);
+      }
+    }
+    if (found === 0) {
+      searchModalResults.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px;">No results found</div>';
+    }
+  });
+}
+
+// Sidebar search - opens modal when typing
 var searchInput = document.getElementById('session-search');
 if (searchInput) {
+  searchInput.addEventListener('focus', function() {
+    searchModal.style.display = 'flex';
+    searchModalInput.value = '';
+    searchModalResults.innerHTML = '';
+    searchModalInput.focus();
+  });
   searchInput.addEventListener('input', function() {
-    var q = searchInput.value.toLowerCase().trim();
-    document.querySelectorAll('.session-item').forEach(function(item) {
-      item.style.display = (!q || item.textContent.toLowerCase().includes(q)) ? '' : 'none';
-    });
-    document.querySelectorAll('.project-folder').forEach(function(folder) {
-      folder.style.display = (!q || folder.textContent.toLowerCase().includes(q)) ? '' : 'none';
-    });
+    searchModal.style.display = 'flex';
+    searchModalInput.value = searchInput.value;
+    searchModalInput.dispatchEvent(new Event('input'));
+    searchModalInput.focus();
   });
 }
 
@@ -1064,10 +1141,8 @@ if (logoutBtn) {
 (async function() {
   await checkAuth();
   await loadSessions();
-
-  var res  = await fetch(API_BASE + '/history.php?action=sessions');
+  var res = await fetch(API_BASE + '/history.php?action=sessions');
   var data = await res.json();
-
   if (!data.success || data.sessions.length === 0) {
     showWelcome();
   } else {

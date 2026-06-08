@@ -409,7 +409,7 @@ if ($correction_applicable) {
   $state['step'] = $prev;
   $bot_map = ['income'=>'No problem - what is your monthly income after tax?','expenses'=>'No problem - what are your total monthly expenses?'];
   $bot = isset($bot_map[$prev]) ? $bot_map[$prev] : 'No problem - what would you like to correct?';
-  respond($db,$session_id,$state,$bot,null,['Other']);
+  respond($db,$session_id,$state,$bot,null,[]);
 }
 
 // Greeting / step handlers

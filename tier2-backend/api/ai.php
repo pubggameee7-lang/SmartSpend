@@ -192,6 +192,7 @@ HARD RULES:
 2. You CANNOT recalculate loans - LOAN_MONTHLY_PAYMENT is the only correct figure
 3. You CANNOT estimate timelines - only use figures from ENGINE OUTPUT
 4. If a number is not in FACTS - say you do not have it, do not guess
+4b. If LOAN_MONTHLY_PAYMENT is in FACTS, always use it - never say you don't have loan details
 5. Never repeat calculations already shown
 6. 2-4 sentences max
 7. One question max per reply
@@ -199,7 +200,8 @@ HARD RULES:
 9. If emotional - empathise first
 10. If off-topic - brief answer then return to budget
 11. CHECKED_ITEM risk levels (GREEN/YELLOW/RED) are for purchases only - NEVER apply them to stress test scenarios
-12. Stress test results show income/surplus changes only - never describe them as GREEN risk or affordable";
+12. Stress test results show income/surplus changes only - never describe them as GREEN risk or affordable
+13. When LOAN_MONTHLY_PAYMENT is in FACTS, those are the current loan figures - always describe them as the current loan, never reference a previous loan amount";
 
   // NO history passed - LLM gets facts only, zero partial sight of old calculations
   // Full session history - calc lines stripped in chat.php so LLM cannot re-reason numbers

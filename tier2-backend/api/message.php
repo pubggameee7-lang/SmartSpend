@@ -310,11 +310,12 @@ foreach (array_reverse($history) as $h) {
   if ($h['role'] === 'bot') { $last_bot = $h['content'] ?? ''; break; }
 }
 $last_was_conversational = !empty($last_bot)
-  && !preg_match('/here is your result|side by side|stress test shows|LOW RISK|MODERATE RISK|HIGH RISK/i', $last_bot)
+  && !preg_match('/here is your result|side by side|stress test shows|LOW RISK|MODERATE RISK|HIGH RISK|tell me the item|what would you like to check|what would you like to buy|noted.*what would|the item and the price/i', $last_bot)
   && preg_match('/\?$|\? |would you like|how does|how do you|what do you|feel|think|consider|explore|focus/i', $last_bot);
 
+
 // If last bot message was conversational and this message has a number but looks conversational - stay in conversation
-if ($num && $state['step'] === 'active' && $last_was_conversational && empty($state['compare_base']) && empty($state['comparing']) && !preg_match('/(save|saving|savings|emergency|fund|pot)/i', $message)) {
+if ($num && $state['step'] === 'active' && $last_was_conversational && empty($state['compare_base']) && empty($state['comparing']) && !preg_match('/(save|saving|savings|emergency|fund|pot)/i', $message) && !$loan_mentioned && ($state['mode'] ?? '') !== 'awaiting_loan' && $interest === null && $term === null) {
   $looksLikeItem = str_word_count($message) <= 3 && !preg_match('/^(so|but|and|or|if|is|it|that|this|yes|no|how|what|why|i |i\')/i', $lower);
   if (!$looksLikeItem) {
     respond($db,$session_id,$state,generateReply($message,$state,$history),null,['Check another item','Run a stress test','Reset budget']);
@@ -360,7 +361,8 @@ if ($state['step'] === 'active' && !empty($state['income']) && !empty($state['ex
 
 // Conversational opener (including "how much" questions with numbers)
 if ($state['step'] === 'active' && preg_match('/^(what|why|how|when|where|who|which|ok|sure|great|thanks|thank you|concern|worried|fine|bad|alright|sounds|feel|agree|disagree|not really|absolutely|of course|exactly|thats|that is|i see|i know|makes sense|tell me|explain|really|seriously|omg|wow|oh|ah|hm|hmm)/i', $lower)
-  && !preg_match('/how much.*save|how long.*save|how much.*need|how much.*have|how much.*should/i', $lower)) {
+  && !preg_match('/how much.*save|how long.*save|how much.*need|how much.*have|how much.*should/i', $lower)
+  && !$loan_mentioned) {
   respond($db,$session_id,$state,generateReply($message,$state,$history),null,['Check another item','Run a stress test','Reset budget']);
 }
 
@@ -416,6 +418,8 @@ if ($correction_applicable) {
 if ($state['step'] === 'greeting') {
   $state['step'] = 'income';
   $item_name = $goal_name_hint ?? parseItemName($message);
+    $greetings = ['hi','hey','hello','hiya','yo','sup','howdy','helo','hii','heya'];
+if ($item_name && in_array(strtolower(trim($item_name)), $greetings)) $item_name = null;
   if ($item_name) {
     $item_name = preg_replace('/\b(costing|worth|at|for|priced?|costs?|approximately|around|roughly)\b\s*£?[\d,.km]*/i', '', $item_name);
     $item_name = trim($item_name);
@@ -560,22 +564,32 @@ if ($expense_change && !$is_extra_saving && $num !== null && $num >= 0 && $num <
 }
 
 if ($sub_mentioned && $num && $num > 0 && !$action_taken) {
-  $monthly_cost = preg_match('/per week|weekly/i', $message) ? round($num * 4.33, 2) : $num;
-  $state['expenses'] = ($state['expenses'] ?? 0) + $monthly_cost;
-  $new_surplus = $state['income'] - $state['expenses'];
-  $system_results['subscription_added'] = '£'.number_format($monthly_cost,2).'/month added';
-  $system_results['new_expenses']       = '£'.number_format($state['expenses'],2).'/month';
-  $system_results['new_surplus']        = '£'.number_format($new_surplus,2).'/month';
+  if (preg_match('/bi.?weekly|every two weeks|every 2 weeks|fortnightly/i', $message)) {
+    $monthly_cost = round($num * 2.17, 2);
+  } elseif (preg_match('/per week|weekly/i', $message)) {
+    $monthly_cost = round($num * 4.33, 2);
+  } else {
+    $monthly_cost = $num;
+  }
+  $sub_name = $goal_name_hint ? cleanItemName($goal_name_hint) : 'subscription';
+  $result = runCalc($db,$session_id,$user_id,$state,$sub_name,$monthly_cost,'recurring',$history);
+  $calculation = $result['calculation'];
+  $system_results['affordability'] = $result['label'].' for '.$sub_name;
+  $quick_replies = ['Check another item','Compare with something else','Run a stress test','Reset budget'];
+  $action_taken = true;
 }
 
 if (!$loan_mentioned && preg_match('/\bloan\b|\bborrow\b|\bfinance\b|\bmortgage\b|\brepayment\b|\bcredit\b/i', $message)) $loan_mentioned = true;
 
-if ($loan_mentioned && !$action_taken) {
+if (($loan_mentioned || ($state['mode'] ?? '') === 'awaiting_loan') && !$action_taken) {
   if (!isset($state['loan'])) $state['loan'] = [];
-  if (empty($state['loan']['amount']) && !$num) {
+ if ((empty($state['loan']['amount']) || ($state['mode'] ?? '') === 'awaiting_loan') && !$num) {
     $hint = !empty($state['active_goal']['name']) ? ' for the '.$state['active_goal']['name'] : '';
-    respond($db,$session_id,$state,'Sure - to calculate a loan'.$hint.', I need three things: the loan amount, the annual interest rate (%), and the repayment term in years. What are these?',null,['Other']);
+    $state['loan'] = [];
+    $state['mode'] = 'awaiting_loan';
+    respond($db,$session_id,$state,'Sure - to calculate a loan'.$hint.', I need three things: the loan amount, the annual interest rate (%), and the repayment term in years. What are these?',null,[]);
   }
+    
   $new_loan_scenario = ($num && $num >= 500) && ($interest !== null || $term !== null);
   if ($correction_field === 'loan_amount' && $num !== null) $state['loan']['amount'] = $num;
   elseif ($num && $num >= 500 && ($new_loan_scenario || empty($state['loan']['amount']))) $state['loan']['amount'] = $num;
@@ -583,7 +597,11 @@ if ($loan_mentioned && !$action_taken) {
   elseif ($interest !== null) $state['loan']['interest'] = $interest;
   if ($correction_field === 'loan_months' && $term !== null) $state['loan']['months'] = $term;
   elseif ($term !== null) $state['loan']['months'] = $term;
-  if ($num && $num >= 500 && $interest !== null && $term !== null) $state['loan'] = ['amount'=>$num,'interest'=>$interest,'months'=>$term];
+  if ($num && $num >= 500 && $interest !== null && $term !== null) {
+  $state['loan'] = ['amount'=>$num,'interest'=>$interest,'months'=>$term];
+} elseif ($num && $num >= 500 && ($state['mode'] ?? '') === 'awaiting_loan') {
+  $state['loan'] = ['amount'=>$num,'interest'=>$interest ?? ($state['loan']['interest'] ?? null),'months'=>$term ?? ($state['loan']['months'] ?? null)];
+}
   if (!empty($state['loan']['amount']) && isset($state['loan']['interest']) && !empty($state['loan']['months'])) {
     $lc = calculateLoan(floatval($state['loan']['amount']), floatval($state['loan']['interest']), intval($state['loan']['months']));
     $state['loan']['monthly_payment'] = $lc['monthly_payment'];
@@ -816,7 +834,9 @@ if (!empty($system_results['affordability'])) {
 
 if (!empty($system_results['loan_monthly_payment']) && $loan_mentioned) {
   $mp = $system_results['loan_monthly_payment'];
-  if (strpos($bot_reply, $mp) === false)
+  $bot_reply = preg_replace('/LOAN_[A-Z_]+=\S+\s*/i', '', $bot_reply);
+  $bot_reply = trim($bot_reply);
+  if (strpos($bot_reply, 'Loan repayment') === false)
     $bot_reply .= "\n\nLoan repayment: {$mp}/month | Total: {$system_results['loan_total_repayment']} | Interest: {$system_results['loan_total_interest']}. {$system_results['loan_affordability']}.";
 }
 if (!empty($system_results['saving_timeline']) && !preg_match('/\d+ month|\d+ year|already there/i', $bot_reply))
